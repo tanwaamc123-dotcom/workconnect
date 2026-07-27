@@ -1,0 +1,7 @@
+.env
+storage/*.sqlite*
+storage/private/
+storage/*.before-restore-*
+assets/uploads/
+tmp/
+.DS_Store
