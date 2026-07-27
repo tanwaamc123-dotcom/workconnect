@@ -6,7 +6,7 @@
             <p>Connect talent.<br>Create success.</p>
         </div>
         <div><strong>Explore</strong><a href="?page=home">Home</a><a href="?page=services">Services</a><a href="?page=home#how-it-works">How it works</a></div>
-        <div><strong>Company</strong><a href="?page=about">About</a><a href="<?= e(contact_ig_setting()) ?>" target="_blank" rel="noopener">Contact</a><a href="?page=privacy">Privacy</a></div>
+        <div><strong>Company</strong><a href="?page=about">About</a><a href="<?= e(contact_ig_setting()) ?>" target="_blank" rel="noopener">Contact</a><a href="?page=privacy">Privacy</a><a href="?page=terms">Terms</a></div>
         <div><strong>Support</strong><a href="?page=help-center">Help center</a><a href="?page=safety">Safety</a><a href="?page=community">Community</a></div>
         <form class="newsletter" action="" method="post">
             <input type="hidden" name="csrf_token" value="<?= e(csrf_token()) ?>"><input type="hidden" name="action" value="subscribe">
@@ -17,6 +17,6 @@
     </div>
     <div class="container footer-bottom"><span>© 2026 WorkConnect. All rights reserved.</span><span>Student project made in Thailand</span></div>
 </footer>
-<script src="assets/js/app.js"></script>
+<script src="assets/js/app.js?v=<?= filemtime(__DIR__ . '/../assets/js/app.js') ?>"></script>
 </body>
 </html>

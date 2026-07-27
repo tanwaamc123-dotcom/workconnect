@@ -19,7 +19,7 @@ $detailPage = (!empty($user) && in_array(($page ?? ''), ['marketplace', 'marketp
             <input type="hidden" name="action" value="toggle_favorite">
             <input type="hidden" name="service_id" value="<?= (int) $service['id'] ?>">
             <input type="hidden" name="return_to" value="<?= $returnTo ?>">
-            <button class="button button-light button-small <?= $isFavorite ? 'active' : '' ?>" type="submit"><?= $isFavorite ? e(t('favorite_saved', $lang ?? 'en')) : e(t('favorite_save', $lang ?? 'en')) ?></button>
+            <button class="button button-light button-small <?= $isFavorite ? 'active' : '' ?>" type="submit"><?= icon_svg('saved') ?><?= $isFavorite ? e(t('favorite_saved', $lang ?? 'en')) : e(t('favorite_save', $lang ?? 'en')) ?></button>
         </form>
         <?php endif; ?>
     </div>
@@ -31,6 +31,6 @@ $detailPage = (!empty($user) && in_array(($page ?? ''), ['marketplace', 'marketp
             <span><?= number_format($completedOrders) ?> <?= e(t('trust_orders_completed', $lang ?? 'en')) ?></span>
             <span><?= number_format($reviews) ?> <?= e(t('trust_reviews', $lang ?? 'en')) ?></span>
         </div>
-        <div class="service-meta"><span class="rating"><?= $rating > 0 ? '★ ' . number_format($rating, 1) . ' (' . $reviews . ')' : 'New service' ?></span><strong>฿<?= number_format($service['price']) ?></strong></div>
+        <div class="service-meta"><span class="rating"><?= icon_svg($rating > 0 ? 'star' : 'add') ?><?= $rating > 0 ? number_format($rating, 1) . ' (' . $reviews . ')' : 'New service' ?></span><strong>฿<?= number_format($service['price']) ?></strong></div>
     </div>
 </article>

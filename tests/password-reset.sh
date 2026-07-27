@@ -2,7 +2,7 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://127.0.0.1/WorkConnect}"
-ROOT="${0:A:h:h}"
+ROOT="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 TMP="$(mktemp -d)"
 JAR="$TMP/cookies"
 EMAIL="reset-test-$$@example.test"

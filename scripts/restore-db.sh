@@ -1,7 +1,7 @@
 #!/bin/zsh
 set -euo pipefail
 
-ROOT="${0:A:h:h}"
+ROOT="$(cd -- "$(dirname -- "$0")/.." && pwd)"
 SOURCE="${1:-}"
 DATABASE="$ROOT/storage/workconnect.sqlite"
 

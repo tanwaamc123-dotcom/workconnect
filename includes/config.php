@@ -38,6 +38,7 @@ function load_env_file(string $path): void
 }
 
 load_env_file(dirname(__DIR__) . '/.env');
+date_default_timezone_set('UTC');
 
 function app_environment(): string
 {
@@ -140,4 +141,12 @@ function stripe_is_configured(): bool
 function stripe_webhook_is_configured(): bool
 {
     return stripe_webhook_secret() !== '';
+}
+
+function stripe_checkout_is_configured(): bool
+{
+    $publishableKey = stripe_publishable_key();
+    $publishableKeyValid = str_starts_with($publishableKey, 'pk_test_')
+        || (app_is_production() && str_starts_with($publishableKey, 'pk_live_'));
+    return stripe_is_configured() && $publishableKeyValid && str_starts_with(stripe_webhook_secret(), 'whsec_');
 }

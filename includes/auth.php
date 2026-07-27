@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
     ini_set('session.use_strict_mode', '1');
+    ini_set('session.gc_maxlifetime', '2592000');
     session_set_cookie_params([
+        'path' => '/',
         'httponly' => true,
         'samesite' => 'Lax',
         'secure' => request_is_https(),
@@ -23,27 +25,50 @@ function current_user(): ?array
         return null;
     }
     $tokenHash = hash('sha256', session_id());
-    $session = fetch_one('SELECT user_id FROM sessions WHERE user_id=? AND token_hash=? AND last_activity>=?', [(int) $_SESSION['user_id'], $tokenHash, date('Y-m-d H:i:s', time() - 43200)]);
+    $session = fetch_one(
+        'SELECT user_id,last_activity FROM sessions WHERE user_id=? AND token_hash=? AND
+         ((persistent=1 AND (expires_at IS NULL OR expires_at>=CURRENT_TIMESTAMP)) OR
+          (persistent=0 AND last_activity>=?))',
+        [(int) $_SESSION['user_id'], $tokenHash, gmdate('Y-m-d H:i:s', time() - 43200)]
+    );
     if (!$session) {
         $_SESSION = [];
         $cachedUser = null;
         return null;
     }
-    db()->prepare('UPDATE sessions SET last_activity=CURRENT_TIMESTAMP WHERE user_id=? AND token_hash=?')->execute([(int) $_SESSION['user_id'], $tokenHash]);
+    if (strtotime((string) $session['last_activity']) < time() - 300) {
+        db()->prepare('UPDATE sessions SET last_activity=CURRENT_TIMESTAMP WHERE user_id=? AND token_hash=?')->execute([(int) $_SESSION['user_id'], $tokenHash]);
+    }
     $stmt = db()->prepare('SELECT users.*, roles.name AS role, roles.label AS role_label FROM users JOIN roles ON roles.id=users.role_id WHERE users.id=?');
     $stmt->execute([(int) $_SESSION['user_id']]);
     $cachedUser = $stmt->fetch() ?: null;
     return $cachedUser;
 }
 
-function login_user(array $user): void
+function login_user(array $user, bool $remember = false): void
 {
     session_regenerate_id(true);
     $_SESSION['user_id'] = (int) $user['id'];
     $_SESSION['csrf_token'] = bin2hex(random_bytes(24));
+    unset($_SESSION['pending_mfa_user_id'], $_SESSION['pending_mfa_expires'], $_SESSION['pending_mfa_remember']);
     $token = hash('sha256', session_id());
-    $stmt = db()->prepare('INSERT INTO sessions (user_id,token_hash,ip_address,user_agent) VALUES (?,?,?,?)');
-    $stmt->execute([(int) $user['id'], $token, client_ip(), substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 250)]);
+    $expiresAt = $remember ? gmdate('Y-m-d H:i:s', time() + 2592000) : null;
+    $stmt = db()->prepare('INSERT INTO sessions (user_id,token_hash,ip_address,user_agent,persistent,expires_at) VALUES (?,?,?,?,?,?)');
+    $stmt->execute([(int) $user['id'], $token, client_ip(), substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 250), $remember ? 1 : 0, $expiresAt]);
+    if ($remember && ini_get('session.use_cookies')) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), session_id(), [
+            'expires' => time() + 2592000,
+            'path' => $params['path'],
+            'domain' => $params['domain'],
+            'secure' => (bool) $params['secure'],
+            'httponly' => true,
+            'samesite' => 'Lax',
+        ]);
+    }
+    db()->prepare(
+        'DELETE FROM sessions WHERE user_id=? AND id NOT IN (SELECT id FROM sessions WHERE user_id=? ORDER BY last_activity DESC LIMIT 8)'
+    )->execute([(int) $user['id'], (int) $user['id']]);
     log_security((int) $user['id'], 'login_success');
 }
 
@@ -131,8 +156,7 @@ function verify_csrf(): void
 
 function log_security(?int $userId, string $event): void
 {
-    $stmt = db()->prepare('INSERT INTO security_logs (user_id,event,ip_address) VALUES (?,?,?)');
-    $stmt->execute([$userId, $event, client_ip()]);
+    audit_event($userId, $event);
 }
 
 function client_ip(): string

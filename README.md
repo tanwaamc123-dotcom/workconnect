@@ -39,7 +39,7 @@ The included `Dockerfile` and `render.yaml` can deploy the app as a Render Docke
 php -r "echo base64_encode(random_bytes(32)), PHP_EOL;"
 ```
 
-Render's free filesystem is ephemeral. Database records remain in PostgreSQL, but new user uploads need persistent object storage or a paid persistent disk before the site is treated as production.
+Render's free filesystem is ephemeral. Production uploads use the included S3-compatible private object-storage driver. See [OPERATIONS.md](OPERATIONS.md) for deployment, scheduled jobs, recovery, monitoring, and rollback.
 
 ## Demo lifecycle
 
@@ -62,18 +62,21 @@ All demo accounts use the password `Demo1234!`.
 
 ## Access model
 
-- Home is the only public content page.
-- Login and Register remain available to guests so they can authenticate.
-- Every marketplace, account, customer, seller, and admin page requires a valid session.
-- Role guards prevent customers, sellers, and administrators from entering another role's workspace.
+- Home, About, Privacy, Terms, Help, Safety, Community, public service discovery, and authentication are available to guests.
+- Customer, seller, and administrator workspaces require a valid server-side session.
+- Role and capability guards separate customer, seller, support, moderation, finance, analyst, and owner actions.
+- Administrators support TOTP MFA; production checks require MFA for every active administrator.
 
 ## Pages
 
 ### Public and authentication
 
 - Home
+- About, Privacy, Terms, Help Center, Safety, and Community
+- Public service search and service details
 - Login
 - Register
+- Password reset and MFA verification
 
 ### Authenticated shared pages
 
@@ -84,12 +87,14 @@ All demo accounts use the password `Demo1234!`.
 - Notifications
 - Profile
 - Settings
+- Disputes and privacy export/deletion requests
 
 ### Customer
 
 - Dashboard
 - Checkout
 - Orders
+- Saved services and wallet top up
 
 ### Seller
 
@@ -100,6 +105,7 @@ All demo accounts use the password `Demo1234!`.
 - Messages
 - Earnings
 - Analytics
+- Payout requests
 - Profile
 - Settings
 
@@ -111,17 +117,20 @@ All demo accounts use the password `Demo1234!`.
 - Message Audit
 - Reports
 - System Settings
+- Disputes, payouts, finance reconciliation, audit logs, role management, moderation, coupons, broadcasts, and exports
 
 ## Implemented workflows
 
-- Registration, login, logout, password hashing, sessions, CSRF protection, role authorization, and security logs
-- Service discovery, filtering, service details, checkout, coupons, simulated payments, and order creation
-- Customer order approval/cancellation and reviews
-- Project conversations with image, PDF, and text attachments
+- Registration, login, logout, password reset, password hashing, persistent sessions, CSRF protection, capability authorization, TOTP MFA, rate limits, and audit logs
+- Service discovery, filtering, service details, checkout, constrained coupons, Stripe-hosted PromptPay payments, wallet accounting, and order creation
+- Customer cancellation/acceptance, seller delivery, revisions, disputes, refunds, reviews, and append-only order events
+- Project conversations with protected image, PDF, and text attachments
 - Notifications and email preferences
 - Profile information and profile image uploads
-- Seller service CRUD, thumbnails, order status management, earnings, and analytics
-- Administrator user suspension, service moderation, order oversight, message audit, reports, and platform settings
+- Seller service CRUD, moderation versioning, thumbnails, order delivery, earnings, payouts, and analytics
+- Administrator user suspension, scoped roles, service moderation, order/dispute/payout oversight, message audit, reports, exports, and platform settings
+- Integer-satang accounting with a double-entry ledger, idempotent provider events, and a reconciliation command
+- S3-compatible private uploads, Resend outbox delivery, health endpoints, PostgreSQL migration, verified backups, and restore tooling
 
 ## Smoke tests
 
@@ -164,10 +173,11 @@ Recommended daily cron entry:
 15 2 * * * cd /Applications/XAMPP/xamppfiles/htdocs/WorkConnect && scripts/backup-db.sh >> storage/private/backups/backup.log 2>&1
 ```
 
-Before production, set `APP_ENV=production`, an HTTPS `APP_URL`, PostgreSQL `DATABASE_URL`, a fresh encryption key, Stripe keys, webhook secret, and `MAIL_TRANSPORT=mail`, then run:
+Before production, set `APP_ENV=production`, an HTTPS `APP_URL`, PostgreSQL `DATABASE_URL`, a fresh encryption key, live Stripe keys, webhook secret, `MAIL_TRANSPORT=resend`, Resend credentials, and S3-compatible storage, then run:
 
 ```bash
 php scripts/production-check.php
+php scripts/reconcile-finance.php
 ```
 
 Rotate `STRIPE_SECRET_KEY` in Stripe Dashboard before deployment. Never reuse a key that has previously been stored in source or shared.

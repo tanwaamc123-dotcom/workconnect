@@ -28,7 +28,7 @@ if ($schema === false) {
     throw new RuntimeException('Unable to read the PostgreSQL schema.');
 }
 $target->exec($schema);
-echo "[PASS] PostgreSQL schema version 1 is ready.\n";
+echo "[PASS] PostgreSQL schema version 3 is ready.\n";
 
 if (!$importSqlite) {
     echo "Run again with --import-sqlite to transfer the current SQLite data.\n";
@@ -73,6 +73,17 @@ $tables = [
     'newsletter_subscribers',
     'schema_meta',
     'payment_requests',
+    'ledger_transactions',
+    'ledger_entries',
+    'order_events',
+    'coupon_redemptions',
+    'payment_provider_events',
+    'payouts',
+    'disputes',
+    'dispute_evidence',
+    'order_deliveries',
+    'outbox_messages',
+    'account_requests',
 ];
 $serialTables = [
     'roles',
@@ -93,6 +104,16 @@ $serialTables = [
     'favorites',
     'newsletter_subscribers',
     'payment_requests',
+    'ledger_transactions',
+    'ledger_entries',
+    'order_events',
+    'coupon_redemptions',
+    'payouts',
+    'disputes',
+    'dispute_evidence',
+    'order_deliveries',
+    'outbox_messages',
+    'account_requests',
 ];
 
 $target->beginTransaction();
@@ -136,7 +157,7 @@ try {
         );
     }
     $target->prepare(
-        "INSERT INTO schema_meta (meta_key,meta_value) VALUES ('schema_version','1')
+        "INSERT INTO schema_meta (meta_key,meta_value) VALUES ('schema_version','3')
          ON CONFLICT (meta_key) DO UPDATE SET meta_value=EXCLUDED.meta_value"
     )->execute();
     $target->commit();

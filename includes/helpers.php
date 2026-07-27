@@ -90,7 +90,6 @@ function ui_preferences(?array $user = null): array
         'ui_scale' => default_ui_scale_setting('comfortable'),
     ];
     if (!$user) {
-        $defaults['theme'] = 'light';
         return $defaults;
     }
     return [
@@ -323,7 +322,7 @@ function interface_icon_markup(string $icon): string
         '◎' => 'analytics',
         '◌' => 'analytics',
         '●' => 'users',
-        '✓' => 'moderation',
+        '✓' => 'check-circle',
         '▣' => 'orders',
         '▤' => 'categories',
         '฿' => 'wallet',
@@ -331,10 +330,10 @@ function interface_icon_markup(string $icon): string
         '⌛' => 'logs',
         '×' => 'logs',
         '!' => 'notifications',
-        '★' => 'analytics',
-        '↗' => 'orders',
+        '★' => 'star',
+        '↗' => 'arrow-right',
         '♥' => 'saved',
-        '○' => 'info',
+        '○' => 'circle',
     ];
 
     $iconName = $map[$icon] ?? $icon;
@@ -361,32 +360,82 @@ function empty_state_html(string $title, string $description, string $actionLabe
 function icon_svg(string $name): string
 {
     $icons = [
-        'home' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 4l8 7.5V20H4Z"/><path d="M9 20v-7h6v7"/></svg>',
-        'search' => '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m16.2 16.2 4.3 4.3"/></svg>',
-        'saved' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5h12v16l-6-3.8L6 20.5Z"/></svg>',
-        'orders' => '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M8 9h8M8 13h8"/><path d="M9 5v4M15 5v4"/></svg>',
-        'messages' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6.5h12a4 4 0 0 1 4 4v2a4 4 0 0 1-4 4H11l-5.5 4v-4H6a4 4 0 0 1-4-4v-2a4 4 0 0 1 4-4Z"/></svg>',
-        'notifications' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 17h12l-1.3-1.8c-.4-.6-.7-1.3-.7-2V10a4 4 0 1 0-8 0v3.2c0 .7-.2 1.4-.7 2Z"/><path d="M10 18a2 2 0 0 0 4 0"/></svg>',
-        'wallet' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h14a2 2 0 0 1 2 2v8H6a2 2 0 0 1-2-2Z"/><path d="M6 7V6a2 2 0 0 1 2-2h10"/><circle cx="16" cy="13" r="1"/></svg>',
-        'profile' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12.2a4.2 4.2 0 1 0 0-8.4 4.2 4.2 0 0 0 0 8.4Z"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>',
-        'settings' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 4.5h3l.5 2a6.2 6.2 0 0 1 1.5.8l1.9-1 2.1 2.1-1 1.9c.3.5.6 1 .8 1.5l2 .5v3l-2 .5a6.2 6.2 0 0 1-.8 1.5l1 1.9-2.1 2.1-1.9-1c-.5.3-1 .6-1.5.8l-.5 2h-3l-.5-2a6.2 6.2 0 0 1-1.5-.8l-1.9 1-2.1-2.1 1-1.9a6.2 6.2 0 0 1-.8-1.5l-2-.5v-3l2-.5c.2-.5.5-1 .8-1.5l-1-1.9L7.5 6.3l1.9 1c.5-.3 1-.6 1.5-.8Z"/><circle cx="12" cy="12" r="3.2"/></svg>',
-        'about' => '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="7" r="1.25"/><path d="M12 11v7"/><path d="M7.5 20h9"/></svg>',
-        'add' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
-        'analytics' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V5"/><path d="M5 19h14"/><path d="M8 15.5v-4"/><path d="M12 15.5V8"/><path d="M16 15.5v-6"/></svg>',
-        'reports' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4h12v16H6z"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>',
-        'users' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM16.5 10a2.5 2.5 0 1 0 0-5"/><path d="M4.5 19a5.5 5.5 0 0 1 11 0"/><path d="M16.2 19a4.7 4.7 0 0 1 3.3-4.5"/></svg>',
-        'categories' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6.5h7l2 2h7v9.5H4z"/><path d="M7 12h10"/></svg>',
-        'coupon' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 7.5h15v3a2.5 2.5 0 1 0 0 5v3h-15v-3a2.5 2.5 0 1 0 0-5z"/><path d="M9 10.5h6M9 13.5h6"/></svg>',
-        'logs' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4.5h8l3.5 3.5v11.5H8z"/><path d="M11 10.5h5M11 14h5M11 17.5h3"/><path d="M16 4.5V8h3.5"/></svg>',
-        'broadcast' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15V9l9-4v14z"/><path d="M5 15h2"/><path d="M17 8a4 4 0 0 1 0 8"/><path d="M19.5 6.5a7 7 0 0 1 0 11"/></svg>',
-        'time' => '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5v5l3 2"/></svg>',
-        'export' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"/><path d="m8 9 4-4 4 4"/><path d="M5 16v3h14v-3"/></svg>',
-        'moderation' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 4.5 7v5.5c0 4.7 3.1 6.9 7.5 8 4.4-1.1 7.5-3.3 7.5-8V7z"/><path d="M9.5 12l1.8 1.8L14.8 10"/></svg>',
-        'topup' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M7.5 8.5A4 4 0 0 1 12 6.5c2.2 0 4 .9 4 2.8 0 4-8.5 2.6-8.5 6.2 0 1.9 1.8 2.8 4 2.8a5 5 0 0 0 4.5-2.2"/></svg>',
-        'info' => '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 10.5v6"/><path d="M12 7.5h.01"/></svg>',
-        'logout' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 5H5v14h5"/><path d="M14 9l4 3-4 3"/><path d="M18 12H8"/></svg>',
+        'home' => '<path d="m3.8 10.7 8.2-7 8.2 7"/><path d="M5.8 9.5v10.1h12.4V9.5M9.4 19.6v-6.5h5.2v6.5"/>',
+        'search' => '<circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.4 4.4"/>',
+        'saved' => '<path d="M6.2 4.2h11.6v16l-5.8-3.7-5.8 3.7Z"/>',
+        'orders' => '<path d="M5.1 8.2h13.8l-1 11.1H6.1Z"/><path d="M8.6 9V7.1a3.4 3.4 0 0 1 6.8 0V9"/>',
+        'messages' => '<path d="M4.2 5.6h15.6v11H10l-5.8 3.2Z"/><path d="M8 9.2h8M8 13h5.2"/>',
+        'notifications' => '<path d="M6.3 16.8h11.4l-1.2-1.9a5 5 0 0 1-.8-2.7V9.8a3.7 3.7 0 0 0-7.4 0v2.4a5 5 0 0 1-.8 2.7Z"/><path d="M9.8 18.5a2.3 2.3 0 0 0 4.4 0"/>',
+        'wallet' => '<path d="M4.2 6.8h14.1a1.7 1.7 0 0 1 1.7 1.7v9.2H5.9A1.9 1.9 0 0 1 4 15.8V6.2a2 2 0 0 1 2-2h11.2"/><path d="M15.1 10.5H20v4.3h-4.9a2.2 2.2 0 1 1 0-4.3Z"/>',
+        'profile' => '<circle cx="12" cy="8.1" r="4.1"/><path d="M4.8 20a7.2 7.2 0 0 1 14.4 0"/>',
+        'settings' => '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+        'about' => '<circle cx="12" cy="12" r="9"/><path d="M12 10.7v5.7M12 7.5h.01"/>',
+        'add' => '<circle cx="12" cy="12" r="9"/><path d="M12 7.8v8.4M7.8 12h8.4"/>',
+        'analytics' => '<path d="M4.5 19.5v-15M4.5 19.5h15"/><path d="m8 15 3.2-4 3 2 5.3-6"/>',
+        'reports' => '<path d="M7 3.8h8l3 3v13.4H7Z"/><path d="M15 3.8v3h3M9.7 11h5.6M9.7 14.4h5.6M9.7 17.8h3.5"/>',
+        'users' => '<circle cx="8.7" cy="8.3" r="3.2"/><path d="M3.5 19a5.2 5.2 0 0 1 10.4 0"/><path d="M15.2 5.5a3 3 0 0 1 0 5.7M15.5 14a5 5 0 0 1 5 5"/>',
+        'categories' => '<path d="M3.8 6.2h6.8l2 2h7.6v10.4H3.8Z"/><path d="M7.2 12h9.6"/>',
+        'coupon' => '<path d="M4 7.1h16v3.1a2.4 2.4 0 0 0 0 4.8v2.9H4V15a2.4 2.4 0 0 0 0-4.8Z"/><path d="M9 9.8h6M9 13.2h6M9 16.2h3.8"/>',
+        'logs' => '<path d="M6.4 4.1h8.2l3 3v12.8H6.4Z"/><path d="M14.6 4.1v3h3M9.2 11h5.6M9.2 14.2h5.6M9.2 17.4h3.4"/>',
+        'broadcast' => '<path d="m4.2 10 11.1-4.8v13.6L4.2 14Z"/><path d="M4.2 10v4M8 15.7l1 4"/><path d="M18 8.2a5.2 5.2 0 0 1 0 7.6"/>',
+        'time' => '<circle cx="12" cy="12" r="9"/><path d="M12 6.8v5.5l3.5 2.1"/>',
+        'export' => '<path d="M12 15V3.8M8.2 7.6 12 3.8l3.8 3.8"/><path d="M5 13.5v6.7h14v-6.7"/>',
+        'moderation' => '<path d="m12 3.3 7.2 3.3v5.2c0 4.6-2.9 7.3-7.2 8.9-4.3-1.6-7.2-4.3-7.2-8.9V6.6Z"/><path d="m8.8 12 2.1 2.1 4.5-4.5"/>',
+        'topup' => '<rect x="3.7" y="5.2" width="16.6" height="13.6" rx="2.2"/><path d="M3.7 9.3h16.6M12 12.3v4.1M9.9 14.35h4.2"/>',
+        'info' => '<circle cx="12" cy="12" r="9"/><path d="M12 10.7v5.7M12 7.5h.01"/>',
+        'logout' => '<path d="M10 4.8H5.2v14.4H10M14.2 8.2 18 12l-3.8 3.8M18 12H8.8"/>',
+        'services' => '<rect x="4" y="4" width="6.2" height="6.2" rx="1.4"/><rect x="13.8" y="4" width="6.2" height="6.2" rx="1.4"/><rect x="4" y="13.8" width="6.2" height="6.2" rx="1.4"/><rect x="13.8" y="13.8" width="6.2" height="6.2" rx="1.4"/>',
+        'shield' => '<path d="m12 3.3 7.2 3.3v5.2c0 4.6-2.9 7.3-7.2 8.9-4.3-1.6-7.2-4.3-7.2-8.9V6.6Z"/><path d="M12 8.2v4.5M12 16h.01"/>',
+        'security' => '<path d="m12 3.3 7.2 3.3v5.2c0 4.6-2.9 7.3-7.2 8.9-4.3-1.6-7.2-4.3-7.2-8.9V6.6Z"/><rect x="9.2" y="10.5" width="5.6" height="4.6" rx="1.2"/><path d="M10.4 10.5V9.3a1.6 1.6 0 0 1 3.2 0v1.2"/>',
+        'finance' => '<rect x="3.8" y="6.1" width="16.4" height="11.8" rx="2"/><path d="M7 12h.01M17 12h.01"/><circle cx="12" cy="12" r="2.8"/>',
+        'help' => '<circle cx="12" cy="12" r="9"/><path d="M9.7 9a2.5 2.5 0 1 1 3.3 2.4c-.8.3-1 1-1 1.8M12 16.6h.01"/>',
+        'community' => '<circle cx="8.2" cy="8.3" r="3"/><circle cx="16.5" cy="9.1" r="2.5"/><path d="M3.5 19a4.7 4.7 0 0 1 9.4 0M13.2 15.1a4.2 4.2 0 0 1 7.3 2.9"/>',
+        'check-circle' => '<circle cx="12" cy="12" r="9"/><path d="m8 12 2.7 2.7 5.6-5.8"/>',
+        'circle' => '<circle cx="12" cy="12" r="8.5"/>',
+        'star' => '<path d="m12 3.8 2.5 5 5.5.8-4 3.9.9 5.5-4.9-2.6L7.1 19l.9-5.5-4-3.9 5.5-.8Z"/>',
+        'arrow-left' => '<path d="m10.3 6.2-5.8 5.8 5.8 5.8M4.8 12h14.7"/>',
+        'arrow-right' => '<path d="m13.7 6.2 5.8 5.8-5.8 5.8M19.2 12H4.5"/>',
+        'chevron-right' => '<path d="m9.2 5.8 6.2 6.2-6.2 6.2"/>',
+        'close' => '<path d="m6.2 6.2 11.6 11.6M17.8 6.2 6.2 17.8"/>',
+        'download' => '<path d="M12 4v11M8.2 11.2 12 15l3.8-3.8"/><path d="M5 19.5h14"/>',
+        'upload' => '<path d="M12 15V4M8.2 7.8 12 4l3.8 3.8"/><path d="M5 19.5h14"/>',
     ];
-    return $icons[$name] ?? $icons['info'];
+    $body = $icons[$name] ?? $icons['info'];
+    return '<svg class="wc-icon wc-icon-' . e($name) . '" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">' . $body . '</svg>';
+}
+
+function route_icon_name(string $page): string
+{
+    return match ($page) {
+        'about', 'about-workspace' => 'about',
+        'privacy', 'admin-security' => 'security',
+        'terms' => 'reports',
+        'help-center' => 'help',
+        'safety' => 'moderation',
+        'community' => 'community',
+        'services', 'marketplace', 'service-detail', 'marketplace-detail',
+        'seller-services', 'admin-services', 'admin-moderation' => 'services',
+        'search' => 'search',
+        'saved-services' => 'saved',
+        'dashboard', 'seller-dashboard', 'admin-control' => 'home',
+        'checkout', 'topup' => 'wallet',
+        'orders', 'seller-orders', 'admin-orders' => 'orders',
+        'messages', 'seller-messages', 'admin-messages' => 'messages',
+        'notifications' => 'notifications',
+        'disputes', 'admin-disputes' => 'shield',
+        'seller-payouts', 'admin-payouts' => 'topup',
+        'profile', 'seller-profile', 'admin-users', 'admin-approvals' => 'profile',
+        'settings', 'seller-settings', 'admin-settings' => 'settings',
+        'seller-add-service' => 'add',
+        'seller-earnings', 'admin-finance' => 'finance',
+        'seller-analytics', 'admin-reports' => 'analytics',
+        'admin-categories' => 'categories',
+        'admin-coupons' => 'coupon',
+        'admin-logs' => 'logs',
+        'admin-broadcast' => 'broadcast',
+        'admin-export' => 'export',
+        default => 'info',
+    };
 }
 
 function onboarding_checklist_html(string $role, ?array $user, string $lang): string
@@ -433,7 +482,7 @@ function onboarding_checklist_html(string $role, ?array $user, string $lang): st
     <div class="onboarding-checklist">
         <?php foreach ($items as $item): ?>
             <article class="<?= $item['done'] ? 'done' : '' ?>">
-                <span><?= $item['done'] ? '✓' : '○' ?></span>
+                <span><?= icon_svg($item['done'] ? 'check-circle' : 'circle') ?></span>
                 <strong><?= e($item['label']) ?></strong>
             </article>
         <?php endforeach; ?>
@@ -1534,10 +1583,11 @@ function deliver_password_reset_link(string $email, string $url): void
 {
     $subject = 'Reset your WorkConnect password';
     $message = "Use this link within 30 minutes to reset your password:\n\n" . $url . "\n\nIf you did not request this, ignore this email.";
-    if (strtolower((string) env_value('MAIL_TRANSPORT', 'log')) === 'mail') {
-        $from = (string) env_value('MAIL_FROM', 'hello@workconnect.test');
-        if (@mail($email, $subject, $message, 'From: ' . $from)) return;
-        throw new RuntimeException('Password reset email could not be sent.');
+    $transport = strtolower((string) env_value('MAIL_TRANSPORT', 'log'));
+    if (in_array($transport, ['resend', 'mail'], true)) {
+        $messageId = queue_email($email, $subject, $message, 'password_reset', ['expires_minutes' => 30]);
+        attempt_outbox_delivery($messageId);
+        return;
     }
     $directory = dirname(__DIR__) . '/storage/private/mail';
     ensure_upload_protection($directory);
@@ -1771,6 +1821,19 @@ function notify(int $userId, string $type, string $title, string $body, string $
 {
     $stmt = db()->prepare('INSERT INTO notifications (user_id,type,title,body,link,is_demo) VALUES (?,?,?,?,?,?)');
     $stmt->execute([$userId, $type, $title, $body, $link, $isDemo ? 1 : 0]);
+    if (!$isDemo && strtolower((string) env_value('MAIL_TRANSPORT', 'log')) !== 'log') {
+        $recipient = fetch_one('SELECT email,email_notifications,status FROM users WHERE id=?', [$userId]);
+        if ($recipient && (int) $recipient['email_notifications'] === 1 && (string) $recipient['status'] === 'active') {
+            $destination = $link !== '' ? app_base_url() . '/' . ltrim($link, '/') : app_base_url();
+            queue_email(
+                (string) $recipient['email'],
+                $title,
+                $body . "\n\nOpen WorkConnect: " . $destination,
+                'notification',
+                ['type' => $type, 'link' => $link]
+            );
+        }
+    }
 }
 
 function realtime_summary(array $user, int $orderId = 0): array
@@ -1779,17 +1842,17 @@ function realtime_summary(array $user, int $orderId = 0): array
     $sql = 'SELECT
         (SELECT COUNT(*) FROM notifications WHERE user_id=? AND is_read=0) AS notifications,
         (SELECT COUNT(*) FROM messages WHERE receiver_id=? AND is_read=0) AS messages,
-        (SELECT COALESCE(wallet_balance,0) FROM users WHERE id=?) AS wallet_balance,
-        (SELECT COALESCE(MAX(created_at), "") FROM notifications WHERE user_id=?) AS notification_version';
+        (SELECT COALESCE(wallet_balance_satang,0) FROM users WHERE id=?) AS wallet_balance_satang,
+        (SELECT COALESCE(MAX(id),0) FROM notifications WHERE user_id=?) AS notification_version';
     if ($orderId > 0) {
-        $sql .= ', (SELECT COALESCE(MAX(created_at), "") FROM messages WHERE order_id=?) AS order_version';
+        $sql .= ', (SELECT COALESCE(MAX(id),0) FROM messages WHERE order_id=?) AS order_version';
         $params[] = $orderId;
     }
     $row = fetch_one($sql, $params) ?? [];
     return [
         'notifications' => (int) ($row['notifications'] ?? 0),
         'messages' => (int) ($row['messages'] ?? 0),
-        'wallet_balance' => (float) ($row['wallet_balance'] ?? 0),
+        'wallet_balance' => satang_to_float((int) ($row['wallet_balance_satang'] ?? 0)),
         'notification_version' => (string) ($row['notification_version'] ?? ''),
         'order_version' => $orderId > 0 ? (string) ($row['order_version'] ?? '') : '',
     ];
@@ -1881,7 +1944,9 @@ function upload_reference_decode(string $value): string
 function is_upload_reference(?string $path): bool
 {
     $path = trim((string) $path);
-    return str_starts_with($path, 'storage/private/uploads/') || str_starts_with($path, 'assets/uploads/');
+    return str_starts_with($path, 'storage/private/uploads/')
+        || str_starts_with($path, 'assets/uploads/')
+        || str_starts_with($path, 'object:uploads/');
 }
 
 function upload_url(?string $path): string
@@ -1920,22 +1985,55 @@ function can_view_upload(?array $user, string $path): bool
         if (($service['status'] ?? '') === 'active') {
             return true;
         }
-        return !empty($user) && (($user['role'] ?? '') === 'admin' || (int) ($service['seller_id'] ?? 0) === (int) ($user['id'] ?? 0));
+        return !empty($user) && (
+            (($user['role'] ?? '') === 'admin' && admin_can($user, 'services.manage'))
+            || (int) ($service['seller_id'] ?? 0) === (int) ($user['id'] ?? 0)
+        );
     }
 
     $message = fetch_one('SELECT sender_id,receiver_id FROM messages WHERE attachment=?', [$path]);
     if ($message) {
-        return !empty($user) && (($user['role'] ?? '') === 'admin' || in_array((int) ($user['id'] ?? 0), [(int) $message['sender_id'], (int) $message['receiver_id']], true));
+        return !empty($user) && (
+            (($user['role'] ?? '') === 'admin' && admin_can($user, 'messages.view'))
+            || in_array((int) ($user['id'] ?? 0), [(int) $message['sender_id'], (int) $message['receiver_id']], true)
+        );
+    }
+
+    $delivery = fetch_one(
+        'SELECT orders.customer_id,orders.seller_id FROM order_deliveries
+         JOIN orders ON orders.id=order_deliveries.order_id WHERE order_deliveries.attachment=?',
+        [$path]
+    );
+    if ($delivery) {
+        return !empty($user) && ((($user['role'] ?? '') === 'admin' && admin_can($user, 'orders.view'))
+            || in_array((int) ($user['id'] ?? 0), [(int) $delivery['customer_id'], (int) $delivery['seller_id']], true));
+    }
+
+    $evidence = fetch_one(
+        'SELECT orders.customer_id,orders.seller_id FROM dispute_evidence
+         JOIN disputes ON disputes.id=dispute_evidence.dispute_id
+         JOIN orders ON orders.id=disputes.order_id WHERE dispute_evidence.attachment=?',
+        [$path]
+    );
+    if ($evidence) {
+        return !empty($user) && ((($user['role'] ?? '') === 'admin' && admin_can($user, 'disputes.manage'))
+            || in_array((int) ($user['id'] ?? 0), [(int) $evidence['customer_id'], (int) $evidence['seller_id']], true));
     }
 
     $wallet = fetch_one('SELECT user_id FROM wallet_transactions WHERE slip_path=?', [$path]);
     if ($wallet) {
-        return !empty($user) && (($user['role'] ?? '') === 'admin' || (int) ($wallet['user_id'] ?? 0) === (int) ($user['id'] ?? 0));
+        return !empty($user) && (
+            (($user['role'] ?? '') === 'admin' && admin_can($user, 'finance.manage'))
+            || (int) ($wallet['user_id'] ?? 0) === (int) ($user['id'] ?? 0)
+        );
     }
 
     $idCardOwner = fetch_one('SELECT id FROM users WHERE id_card_front=? OR id_card_back=?', [$path, $path]);
     if ($idCardOwner) {
-        return !empty($user) && (($user['role'] ?? '') === 'admin' || (int) ($idCardOwner['id'] ?? 0) === (int) ($user['id'] ?? 0));
+        return !empty($user) && (
+            (($user['role'] ?? '') === 'admin' && admin_can($user, 'users.view'))
+            || (int) ($idCardOwner['id'] ?? 0) === (int) ($user['id'] ?? 0)
+        );
     }
 
     $avatarOwner = fetch_one('SELECT id FROM users WHERE avatar=?', [$path]);
@@ -1943,7 +2041,10 @@ function can_view_upload(?array $user, string $path): bool
         if (empty($user)) {
             return false;
         }
-        if (($user['role'] ?? '') === 'admin' || (int) ($avatarOwner['id'] ?? 0) === (int) ($user['id'] ?? 0)) {
+        if (
+            (($user['role'] ?? '') === 'admin' && admin_can($user, 'users.view'))
+            || (int) ($avatarOwner['id'] ?? 0) === (int) ($user['id'] ?? 0)
+        ) {
             return true;
         }
         if ((int) scalar('SELECT COUNT(*) FROM services WHERE seller_id=? AND status="active"', [(int) $avatarOwner['id']]) > 0) {
@@ -1952,7 +2053,22 @@ function can_view_upload(?array $user, string $path): bool
         return (int) scalar('SELECT COUNT(*) FROM orders WHERE (customer_id=? AND seller_id=?) OR (customer_id=? AND seller_id=?)', [(int) $user['id'], (int) $avatarOwner['id'], (int) $avatarOwner['id'], (int) $user['id']]) > 0;
     }
 
-    return !empty($user) && ($user['role'] ?? '') === 'admin';
+    return !empty($user)
+        && ($user['role'] ?? '') === 'admin'
+        && admin_can($user, 'system.manage');
+}
+
+function is_sensitive_upload(string $path): bool
+{
+    return (int) scalar(
+        'SELECT
+         (SELECT COUNT(*) FROM messages WHERE attachment=?)
+         +(SELECT COUNT(*) FROM wallet_transactions WHERE slip_path=?)
+         +(SELECT COUNT(*) FROM users WHERE id_card_front=? OR id_card_back=?)
+         +(SELECT COUNT(*) FROM order_deliveries WHERE attachment=?)
+         +(SELECT COUNT(*) FROM dispute_evidence WHERE attachment=?)',
+        [$path, $path, $path, $path, $path, $path]
+    ) > 0;
 }
 
 function store_upload(string $field, array $allowedMime, int $maxBytes = 5242880): string
@@ -1968,19 +2084,37 @@ function store_upload(string $field, array $allowedMime, int $maxBytes = 5242880
     if (!isset($allowedMime[$mime])) {
         throw new RuntimeException('This file type is not supported.');
     }
-    $directory = upload_storage_root() . '/' . date('Ym');
+    $period = gmdate('Ym');
+    $filename = gmdate('Ymd') . '-' . bin2hex(random_bytes(16)) . '.' . $allowedMime[$mime];
+    if (storage_driver() === 's3') {
+        $body = file_get_contents((string) $file['tmp_name']);
+        if (!is_string($body)) {
+            throw new RuntimeException('The uploaded file could not be read.');
+        }
+        $key = 'uploads/' . $period . '/' . $filename;
+        object_storage_put($key, $body, (string) $mime);
+        return 'object:' . $key;
+    }
+    $directory = upload_storage_root() . '/' . $period;
     ensure_upload_protection(upload_storage_root());
     ensure_upload_protection($directory);
     ensure_upload_protection(upload_legacy_root());
-    $filename = date('Ymd') . '-' . bin2hex(random_bytes(16)) . '.' . $allowedMime[$mime];
     if (!move_uploaded_file($file['tmp_name'], $directory . '/' . $filename)) {
         throw new RuntimeException('The uploaded file could not be stored.');
     }
-    return 'storage/private/uploads/' . date('Ym') . '/' . $filename;
+    return 'storage/private/uploads/' . $period . '/' . $filename;
 }
 
 function delete_stored_upload(string $path): void
 {
+    if (str_starts_with($path, 'object:')) {
+        try {
+            object_storage_delete($path);
+        } catch (Throwable $error) {
+            app_log('error', 'Unable to delete object storage upload.', ['reference' => hash('sha256', $path)]);
+        }
+        return;
+    }
     if (!str_starts_with($path, 'storage/private/uploads/')) {
         return;
     }

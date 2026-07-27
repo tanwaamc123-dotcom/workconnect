@@ -21,8 +21,8 @@ login_and_check() {
   print "[PASS] $role routes load."
 }
 
-login_and_check customer customer@workconnect.test 'Demo1234!' 'dashboard marketplace orders saved-services messages notifications profile settings topup about-workspace'
-login_and_check seller seller@workconnect.test 'Demo1234!' 'seller-dashboard seller-services seller-add-service seller-orders seller-messages seller-earnings seller-analytics seller-profile seller-settings marketplace messages notifications settings'
-login_and_check admin admin@workconnect.test 'Demo1234!' 'admin-users admin-services admin-orders admin-messages admin-control admin-approvals admin-moderation admin-categories admin-coupons admin-logs admin-broadcast admin-reports admin-finance admin-settings marketplace messages notifications settings'
+login_and_check customer customer@workconnect.test 'Demo1234!' 'dashboard marketplace orders saved-services messages notifications profile settings topup disputes about-workspace'
+login_and_check seller seller@workconnect.test 'Demo1234!' 'seller-dashboard seller-services seller-add-service seller-orders seller-messages seller-earnings seller-payouts seller-analytics seller-profile seller-settings disputes marketplace messages notifications settings'
+login_and_check admin admin@workconnect.test 'Demo1234!' 'admin-users admin-services admin-orders admin-messages admin-disputes admin-payouts admin-control admin-approvals admin-moderation admin-categories admin-coupons admin-logs admin-broadcast admin-export admin-reports admin-finance admin-settings admin-security marketplace messages notifications settings'
 
 print '[OK] Authenticated route tests passed.'

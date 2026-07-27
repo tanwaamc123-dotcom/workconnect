@@ -27,6 +27,7 @@ function db(): PDO
     } else {
         assert_database_schema($connection);
     }
+    database_maybe_housekeeping($connection);
 
     $pdo = $connection;
     return $pdo;
@@ -66,6 +67,30 @@ function database_connection_config(): array
 function database_driver(?PDO $pdo = null): string
 {
     return (string) ($pdo ?? db())->getAttribute(PDO::ATTR_DRIVER_NAME);
+}
+
+function database_maybe_housekeeping(PDO $connection): void
+{
+    try {
+        if (random_int(1, 100) !== 1) {
+            return;
+        }
+        if (database_driver($connection) === 'pgsql') {
+            $connection->exec("DELETE FROM sessions WHERE (persistent=1 AND expires_at<CURRENT_TIMESTAMP) OR (persistent=0 AND last_activity<CURRENT_TIMESTAMP-INTERVAL '12 hours')");
+            $connection->exec("DELETE FROM rate_limits WHERE window_started_at<CURRENT_TIMESTAMP-INTERVAL '2 days'");
+            $connection->exec("DELETE FROM password_reset_tokens WHERE expires_at<CURRENT_TIMESTAMP-INTERVAL '1 day'");
+            $connection->exec("UPDATE payment_requests SET status='failed',processing_started_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE status='processing' AND processing_started_at<CURRENT_TIMESTAMP-INTERVAL '15 minutes'");
+            $connection->exec("UPDATE outbox_messages SET status='failed',next_attempt_at=CURRENT_TIMESTAMP,last_error='Recovered stale processing claim',updated_at=CURRENT_TIMESTAMP WHERE status='processing' AND updated_at<CURRENT_TIMESTAMP-INTERVAL '15 minutes'");
+            return;
+        }
+        $connection->exec("DELETE FROM sessions WHERE (persistent=1 AND expires_at<CURRENT_TIMESTAMP) OR (persistent=0 AND last_activity<datetime('now','-12 hours'))");
+        $connection->exec("DELETE FROM rate_limits WHERE window_started_at<datetime('now','-2 days')");
+        $connection->exec("DELETE FROM password_reset_tokens WHERE expires_at<datetime('now','-1 day')");
+        $connection->exec("UPDATE payment_requests SET status='failed',processing_started_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE status='processing' AND processing_started_at<datetime('now','-15 minutes')");
+        $connection->exec("UPDATE outbox_messages SET status='failed',next_attempt_at=CURRENT_TIMESTAMP,last_error='Recovered stale processing claim',updated_at=CURRENT_TIMESTAMP WHERE status='processing' AND updated_at<datetime('now','-15 minutes')");
+    } catch (Throwable $error) {
+        error_log('WorkConnect database housekeeping failed: ' . $error->getMessage());
+    }
 }
 
 function database_last_insert_id(?PDO $pdo = null): int
@@ -135,17 +160,30 @@ function database_portable_sql(string $sql, ?string $driver = null): string
 function assert_database_schema(PDO $pdo): void
 {
     try {
-        $ready = (bool) $pdo->query("SELECT 1 FROM schema_meta WHERE meta_key='schema_version'")->fetchColumn();
+        $version = (int) $pdo->query("SELECT meta_value FROM schema_meta WHERE meta_key='schema_version'")->fetchColumn();
     } catch (Throwable $error) {
         throw new RuntimeException('PostgreSQL is connected but not initialized. Run: php scripts/database-migrate.php', 0, $error);
     }
-    if (!$ready) {
+    if ($version < 3) {
         throw new RuntimeException('PostgreSQL schema is out of date. Run: php scripts/database-migrate.php');
     }
 }
 
 function initialize_database(PDO $pdo): void
 {
+    // Bump this whenever the SQLite bootstrap schema changes so existing installs migrate.
+    $runtimeRevision = '20260724.1';
+    try {
+        $currentRevision = (string) $pdo->query(
+            "SELECT meta_value FROM schema_meta WHERE meta_key='runtime_schema_revision'"
+        )->fetchColumn();
+        if (hash_equals($runtimeRevision, $currentRevision)) {
+            return;
+        }
+    } catch (Throwable $error) {
+        // A fresh database does not have schema_meta yet.
+    }
+
     $pdo->exec(<<<'SQL'
         CREATE TABLE IF NOT EXISTS roles (id INTEGER PRIMARY KEY AUTOINCREMENT,name TEXT NOT NULL UNIQUE,label TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS users (
@@ -249,6 +287,152 @@ function initialize_database(PDO $pdo): void
             FOREIGN KEY (service_id) REFERENCES services(id) ON DELETE SET NULL,
             FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL
         );
+        CREATE TABLE IF NOT EXISTS ledger_transactions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            reference TEXT NOT NULL UNIQUE,
+            transaction_type TEXT NOT NULL,
+            order_id INTEGER DEFAULT NULL,
+            user_id INTEGER DEFAULT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS ledger_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            transaction_id INTEGER NOT NULL,
+            account_code TEXT NOT NULL,
+            owner_type TEXT NOT NULL DEFAULT 'platform',
+            owner_id INTEGER NOT NULL DEFAULT 0,
+            amount_satang INTEGER NOT NULL CHECK(amount_satang<>0),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (transaction_id) REFERENCES ledger_transactions(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS order_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            actor_id INTEGER DEFAULT NULL,
+            event TEXT NOT NULL,
+            from_status TEXT DEFAULT NULL,
+            to_status TEXT DEFAULT NULL,
+            reason TEXT NOT NULL DEFAULT '',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+            FOREIGN KEY (actor_id) REFERENCES users(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS coupon_redemptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            coupon_id INTEGER NOT NULL,
+            order_id INTEGER NOT NULL UNIQUE,
+            user_id INTEGER NOT NULL,
+            discount_satang INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (coupon_id) REFERENCES coupons(id) ON DELETE RESTRICT,
+            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS payment_provider_events (
+            event_id TEXT PRIMARY KEY,
+            event_type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'processing',
+            payload_hash TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 1,
+            last_error TEXT NOT NULL DEFAULT '',
+            processed_at TEXT DEFAULT NULL,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS payouts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            seller_id INTEGER NOT NULL,
+            amount_satang INTEGER NOT NULL CHECK(amount_satang>0),
+            status TEXT NOT NULL DEFAULT 'requested',
+            destination_label TEXT NOT NULL DEFAULT '',
+            reference TEXT NOT NULL UNIQUE,
+            requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            reviewed_by INTEGER DEFAULT NULL,
+            reviewed_at TEXT DEFAULT NULL,
+            paid_at TEXT DEFAULT NULL,
+            rejection_reason TEXT NOT NULL DEFAULT '',
+            is_demo INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (seller_id) REFERENCES users(id) ON DELETE RESTRICT,
+            FOREIGN KEY (reviewed_by) REFERENCES users(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS disputes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            opened_by INTEGER NOT NULL,
+            against_user_id INTEGER DEFAULT NULL,
+            reason TEXT NOT NULL,
+            details TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'open',
+            assigned_to INTEGER DEFAULT NULL,
+            resolution TEXT NOT NULL DEFAULT '',
+            resolution_action TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            resolved_at TEXT DEFAULT NULL,
+            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+            FOREIGN KEY (opened_by) REFERENCES users(id) ON DELETE RESTRICT,
+            FOREIGN KEY (against_user_id) REFERENCES users(id) ON DELETE SET NULL,
+            FOREIGN KEY (assigned_to) REFERENCES users(id) ON DELETE SET NULL
+        );
+        CREATE TABLE IF NOT EXISTS dispute_evidence (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dispute_id INTEGER NOT NULL,
+            uploaded_by INTEGER NOT NULL,
+            note TEXT NOT NULL DEFAULT '',
+            attachment TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (dispute_id) REFERENCES disputes(id) ON DELETE CASCADE,
+            FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE RESTRICT
+        );
+        CREATE TABLE IF NOT EXISTS order_deliveries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            order_id INTEGER NOT NULL,
+            seller_id INTEGER NOT NULL,
+            message TEXT NOT NULL,
+            attachment TEXT NOT NULL DEFAULT '',
+            revision_number INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'submitted',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+            FOREIGN KEY (seller_id) REFERENCES users(id) ON DELETE RESTRICT
+        );
+        CREATE TABLE IF NOT EXISTS outbox_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel TEXT NOT NULL DEFAULT 'email',
+            recipient TEXT NOT NULL,
+            subject TEXT NOT NULL,
+            body TEXT NOT NULL,
+            template TEXT NOT NULL DEFAULT 'plain',
+            status TEXT NOT NULL DEFAULT 'pending',
+            attempts INTEGER NOT NULL DEFAULT 0,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            next_attempt_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            sent_at TEXT DEFAULT NULL,
+            last_error TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS job_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            detail TEXT NOT NULL DEFAULT '',
+            finished_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS account_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            request_type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            notes TEXT NOT NULL DEFAULT '',
+            requested_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            completed_at TEXT DEFAULT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
     SQL);
 
     foreach (['users','services','coupons','orders','messages','payments','notifications','reviews','wallet_transactions'] as $table) {
@@ -261,6 +445,43 @@ function initialize_database(PDO $pdo): void
     ensure_column($pdo, 'payment_requests', 'title', "TEXT NOT NULL DEFAULT ''");
     ensure_column($pdo, 'payment_requests', 'payload_json', "TEXT NOT NULL DEFAULT '{}'");
     ensure_column($pdo, 'payment_requests', 'updated_at', 'TEXT');
+    foreach ([
+        ['security_logs', 'target_type', "TEXT NOT NULL DEFAULT ''"],
+        ['security_logs', 'target_id', 'INTEGER DEFAULT NULL'],
+        ['security_logs', 'details_json', "TEXT NOT NULL DEFAULT '{}'"],
+        ['security_logs', 'user_agent', "TEXT NOT NULL DEFAULT ''"],
+        ['security_logs', 'request_id', "TEXT NOT NULL DEFAULT ''"],
+        ['users', 'wallet_balance_satang', 'INTEGER NOT NULL DEFAULT 0'],
+        ['users', 'id_card_fingerprint', "TEXT NOT NULL DEFAULT ''"],
+        ['users', 'admin_role', "TEXT NOT NULL DEFAULT ''"],
+        ['users', 'admin_mfa_secret', "TEXT NOT NULL DEFAULT ''"],
+        ['users', 'admin_mfa_enabled', 'INTEGER NOT NULL DEFAULT 0'],
+        ['users', 'mfa_last_counter', 'INTEGER NOT NULL DEFAULT -1'],
+        ['sessions', 'persistent', 'INTEGER NOT NULL DEFAULT 0'],
+        ['sessions', 'expires_at', 'TEXT DEFAULT NULL'],
+        ['services', 'price_satang', 'INTEGER NOT NULL DEFAULT 0'],
+        ['services', 'moderation_version', 'INTEGER NOT NULL DEFAULT 1'],
+        ['coupons', 'max_uses', 'INTEGER DEFAULT NULL'],
+        ['coupons', 'per_user_limit', 'INTEGER NOT NULL DEFAULT 1'],
+        ['coupons', 'minimum_satang', 'INTEGER NOT NULL DEFAULT 0'],
+        ['orders', 'subtotal_satang', 'INTEGER NOT NULL DEFAULT 0'],
+        ['orders', 'discount_satang', 'INTEGER NOT NULL DEFAULT 0'],
+        ['orders', 'total_satang', 'INTEGER NOT NULL DEFAULT 0'],
+        ['orders', 'fee_rate_bps', 'INTEGER NOT NULL DEFAULT 1000'],
+        ['orders', 'platform_fee_satang', 'INTEGER NOT NULL DEFAULT 0'],
+        ['orders', 'seller_net_satang', 'INTEGER NOT NULL DEFAULT 0'],
+        ['orders', 'revision_limit', 'INTEGER NOT NULL DEFAULT 2'],
+        ['orders', 'revision_count', 'INTEGER NOT NULL DEFAULT 0'],
+        ['orders', 'accepted_at', 'TEXT DEFAULT NULL'],
+        ['orders', 'cancellation_reason', "TEXT NOT NULL DEFAULT ''"],
+        ['payments', 'amount_satang', 'INTEGER NOT NULL DEFAULT 0'],
+        ['payments', 'refunded_satang', 'INTEGER NOT NULL DEFAULT 0'],
+        ['wallet_transactions', 'amount_satang', 'INTEGER NOT NULL DEFAULT 0'],
+        ['payment_requests', 'amount_satang', 'INTEGER NOT NULL DEFAULT 0'],
+        ['payment_requests', 'processing_started_at', 'TEXT DEFAULT NULL'],
+    ] as [$table, $column, $definition]) {
+        ensure_column($pdo, $table, $column, $definition);
+    }
     $pdo->exec("UPDATE wallet_transactions SET updated_at=COALESCE(NULLIF(updated_at,''), CURRENT_TIMESTAMP) WHERE updated_at IS NULL OR updated_at=''");
     $pdo->exec("UPDATE payment_requests SET updated_at=COALESCE(NULLIF(updated_at,''), CURRENT_TIMESTAMP) WHERE updated_at IS NULL OR updated_at=''");
     $pdo->exec("UPDATE payment_requests SET provider_session_id=NULL WHERE provider_session_id=''");
@@ -271,6 +492,7 @@ function initialize_database(PDO $pdo): void
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_requests_provider_payment_intent ON payment_requests(provider_payment_intent) WHERE provider_payment_intent IS NOT NULL');
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_user_token ON sessions(user_id, token_hash)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_sessions_last_activity ON sessions(last_activity)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_notifications_user_read_id ON notifications(user_id, is_read, id)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_messages_receiver_read_id ON messages(receiver_id, is_read, id)');
@@ -278,12 +500,31 @@ function initialize_database(PDO $pdo): void
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_orders_customer_status ON orders(customer_id, status)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_orders_seller_status ON orders(seller_id, status)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_orders_service ON orders(service_id)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_orders_status_created ON orders(status, created_at)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_payments_status_paid ON payments(status, paid_at)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_payment_requests_user_status ON payment_requests(user_id, status, created_at)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_services_status_seller ON services(status, seller_id)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_services_category_status ON services(category_id, status)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_wallet_transactions_user_status ON wallet_transactions(user_id, status, created_at)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_security_logs_user_created ON security_logs(user_id, created_at)');
     $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_transactions_reference ON wallet_transactions(reference)');
     $pdo->exec('CREATE INDEX IF NOT EXISTS idx_password_reset_user_expires ON password_reset_tokens(user_id, expires_at)');
+    $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_id_card_fingerprint ON users(id_card_fingerprint) WHERE id_card_fingerprint<>''");
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_security_logs_request_id ON security_logs(request_id)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_ledger_entries_account_owner ON ledger_entries(account_code,owner_type,owner_id)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_ledger_entries_transaction ON ledger_entries(transaction_id)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_order_events_order_created ON order_events(order_id,created_at)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_coupon_redemptions_coupon_user ON coupon_redemptions(coupon_id,user_id)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_provider_events_status_updated ON payment_provider_events(status,updated_at)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_payouts_seller_status ON payouts(seller_id,status,requested_at)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_disputes_status_updated ON disputes(status,updated_at)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_disputes_order ON disputes(order_id)');
+    $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_disputes_active_order_unique ON disputes(order_id) WHERE status IN ('open','investigating')");
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_deliveries_order_created ON order_deliveries(order_id,created_at)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_outbox_status_next ON outbox_messages(status,next_attempt_at)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_job_runs_name_finished ON job_runs(job_name,finished_at)');
+    $pdo->exec('CREATE INDEX IF NOT EXISTS idx_account_requests_user_type_status ON account_requests(user_id,request_type,status,requested_at)');
+    $pdo->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_account_requests_pending_unique ON account_requests(user_id,request_type) WHERE status='pending'");
     $pdo->exec("DELETE FROM sessions WHERE last_activity < datetime('now', '-30 days')");
     $pdo->exec("DELETE FROM rate_limits WHERE window_started_at < datetime('now', '-2 days')");
     $pdo->exec("DELETE FROM password_reset_tokens WHERE expires_at < datetime('now', '-1 day')");
@@ -303,13 +544,26 @@ function initialize_database(PDO $pdo): void
             ensure_column($pdo, $table, $column, $definition);
         }
     $pdo->exec("UPDATE users SET theme=COALESCE(NULLIF(theme,''),'light'), language=COALESCE(NULLIF(language,''),'en'), text_scale=COALESCE(NULLIF(text_scale,''),'medium'), ui_scale=COALESCE(NULLIF(ui_scale,''),'comfortable'), wallet_balance=COALESCE(wallet_balance,0)");
+    $pdo->exec('UPDATE users SET wallet_balance_satang=CAST(ROUND(COALESCE(wallet_balance,0)*100) AS INTEGER) WHERE wallet_balance_satang=0 AND COALESCE(wallet_balance,0)<>0');
+    $pdo->exec('UPDATE services SET price_satang=CAST(ROUND(COALESCE(price,0)*100) AS INTEGER) WHERE price_satang=0 AND COALESCE(price,0)<>0');
+    $pdo->exec('UPDATE orders SET subtotal_satang=CAST(ROUND(COALESCE(subtotal,0)*100) AS INTEGER),discount_satang=CAST(ROUND(COALESCE(discount,0)*100) AS INTEGER),total_satang=CAST(ROUND(COALESCE(total,0)*100) AS INTEGER) WHERE total_satang=0 AND COALESCE(total,0)<>0');
+    $pdo->exec('UPDATE orders SET platform_fee_satang=CAST(ROUND(total_satang*fee_rate_bps/10000.0) AS INTEGER),seller_net_satang=total_satang-CAST(ROUND(total_satang*fee_rate_bps/10000.0) AS INTEGER) WHERE total_satang>0 AND seller_net_satang=0');
+    $pdo->exec('UPDATE payments SET amount_satang=CAST(ROUND(COALESCE(amount,0)*100) AS INTEGER) WHERE amount_satang=0 AND COALESCE(amount,0)<>0');
+    $pdo->exec('UPDATE wallet_transactions SET amount_satang=CAST(ROUND(COALESCE(amount,0)*100) AS INTEGER) WHERE amount_satang=0 AND COALESCE(amount,0)<>0');
+    $pdo->exec('UPDATE payment_requests SET amount_satang=CAST(ROUND(COALESCE(amount,0)*100) AS INTEGER) WHERE amount_satang=0 AND COALESCE(amount,0)<>0');
+    $pdo->exec("UPDATE users SET admin_role='owner' WHERE role_id=(SELECT id FROM roles WHERE name='admin') AND admin_role=''");
     $pdo->exec("UPDATE system_settings SET setting_value='50',updated_at=CURRENT_TIMESTAMP WHERE setting_key='topup_minimum' AND setting_value IN ('', '200')");
     $pdo->exec("UPDATE system_settings SET setting_value='hosted_promptpay',updated_at=CURRENT_TIMESTAMP WHERE setting_key='payment_mode' AND setting_value='manual_wallet'");
     $pdo->exec("UPDATE system_settings SET setting_value='Pay with PromptPay on the Stripe-hosted page. Your wallet is credited automatically after Stripe confirms the payment.',updated_at=CURRENT_TIMESTAMP WHERE setting_key='payment_instructions' AND setting_value='Transfer the exact amount, upload the slip, and wait for admin approval before using your balance.'");
     bootstrap_reference_data($pdo);
     migrate_legacy_demo_data($pdo);
     ensure_enhanced_demo_data($pdo);
-    $pdo->exec("INSERT INTO schema_meta (meta_key,meta_value) VALUES ('schema_version','1') ON CONFLICT(meta_key) DO UPDATE SET meta_value=excluded.meta_value");
+    $pdo->exec("INSERT INTO schema_meta (meta_key,meta_value) VALUES ('schema_version','3') ON CONFLICT(meta_key) DO UPDATE SET meta_value=excluded.meta_value");
+    $revisionStatement = $pdo->prepare(
+        "INSERT INTO schema_meta (meta_key,meta_value) VALUES ('runtime_schema_revision',?)
+         ON CONFLICT(meta_key) DO UPDATE SET meta_value=excluded.meta_value"
+    );
+    $revisionStatement->execute([$runtimeRevision]);
 }
 
 function ensure_column(PDO $pdo, string $table, string $column, string $definition): void
@@ -861,7 +1115,16 @@ function install_demo_data(PDO $pdo): void
 function clear_demo_data(PDO $pdo): array
 {
     $files = [];
-    foreach (['SELECT avatar path FROM users WHERE is_demo=1','SELECT thumbnail path FROM services WHERE is_demo=1','SELECT attachment path FROM messages WHERE is_demo=1'] as $sql) {
+    foreach ([
+        'SELECT avatar path FROM users WHERE is_demo=1',
+        'SELECT id_card_front path FROM users WHERE is_demo=1',
+        'SELECT id_card_back path FROM users WHERE is_demo=1',
+        'SELECT thumbnail path FROM services WHERE is_demo=1',
+        'SELECT attachment path FROM messages WHERE is_demo=1',
+        'SELECT slip_path path FROM wallet_transactions WHERE is_demo=1',
+        'SELECT order_deliveries.attachment path FROM order_deliveries JOIN orders ON orders.id=order_deliveries.order_id WHERE orders.is_demo=1',
+        'SELECT dispute_evidence.attachment path FROM dispute_evidence JOIN disputes ON disputes.id=dispute_evidence.dispute_id JOIN orders ON orders.id=disputes.order_id WHERE orders.is_demo=1',
+    ] as $sql) {
         foreach ($pdo->query($sql)->fetchAll() as $row) {
             $path = (string) $row['path'];
             if (str_starts_with($path, 'assets/uploads/') || str_starts_with($path, 'storage/private/uploads/')) {
@@ -872,6 +1135,8 @@ function clear_demo_data(PDO $pdo): array
     $deleted = ['users'=>(int)$pdo->query('SELECT COUNT(*) FROM users WHERE is_demo=1')->fetchColumn(),'services'=>(int)$pdo->query('SELECT COUNT(*) FROM services WHERE is_demo=1')->fetchColumn(),'orders'=>(int)$pdo->query('SELECT COUNT(*) FROM orders WHERE is_demo=1')->fetchColumn()];
     $pdo->beginTransaction();
     try {
+        $pdo->exec('DELETE FROM ledger_transactions WHERE order_id IN (SELECT id FROM orders WHERE is_demo=1) OR user_id IN (SELECT id FROM users WHERE is_demo=1)');
+        $pdo->exec('DELETE FROM payouts WHERE is_demo=1 OR seller_id IN (SELECT id FROM users WHERE is_demo=1)');
         $pdo->exec('DELETE FROM reviews WHERE is_demo=1 OR order_id IN (SELECT id FROM orders WHERE is_demo=1)');
         $pdo->exec('DELETE FROM messages WHERE is_demo=1 OR order_id IN (SELECT id FROM orders WHERE is_demo=1)');
         $pdo->exec('DELETE FROM payments WHERE is_demo=1 OR order_id IN (SELECT id FROM orders WHERE is_demo=1)');
@@ -882,15 +1147,115 @@ function clear_demo_data(PDO $pdo): array
         $pdo->exec('DELETE FROM security_logs WHERE user_id IN (SELECT id FROM users WHERE is_demo=1)');
         $pdo->exec('DELETE FROM users WHERE is_demo=1');
         $pdo->exec('DELETE FROM coupons WHERE is_demo=1');
-        $pdo->exec("DELETE FROM schema_meta WHERE meta_key IN ('demo_tracking_v1','demo_dataset_v2','demo_dataset_v3')");
+        $pdo->exec("DELETE FROM schema_meta WHERE meta_key IN ('demo_tracking_v1','demo_dataset_v2','demo_dataset_v3','ledger_opening_v2')");
         $pdo->commit();
     } catch (Throwable $error) {
         $pdo->rollBack();
         throw $error;
     }
     foreach (array_unique($files) as $file) {
-        $absolute = dirname(__DIR__) . '/' . $file;
-        if (is_file($absolute)) @unlink($absolute);
+        delete_stored_upload($file);
     }
     return $deleted;
+}
+
+/**
+ * Retire demo activity while keeping its service catalogue under a real seller.
+ * The caller must select an active non-demo seller before any records are changed.
+ */
+function retire_demo_data(PDO $pdo, int $serviceOwnerId): array
+{
+    $owner = $pdo->prepare(
+        "SELECT users.id,users.email FROM users JOIN roles ON roles.id=users.role_id
+         WHERE users.id=? AND roles.name='seller' AND users.status='active' AND users.is_demo=0"
+    );
+    $owner->execute([$serviceOwnerId]);
+    $serviceOwner = $owner->fetch();
+    if (!$serviceOwner) {
+        throw new RuntimeException('Choose an active, non-demo seller account to own the retained services.');
+    }
+
+    $demoUsers = $pdo->query('SELECT id FROM users WHERE is_demo=1')->fetchAll(PDO::FETCH_COLUMN);
+    if ($demoUsers === []) {
+        throw new RuntimeException('No demo data is installed.');
+    }
+
+    $files = [];
+    foreach ([
+        'SELECT avatar path FROM users WHERE is_demo=1',
+        'SELECT id_card_front path FROM users WHERE is_demo=1',
+        'SELECT id_card_back path FROM users WHERE is_demo=1',
+        'SELECT attachment path FROM messages WHERE is_demo=1',
+        'SELECT slip_path path FROM wallet_transactions WHERE is_demo=1',
+        'SELECT order_deliveries.attachment path FROM order_deliveries JOIN orders ON orders.id=order_deliveries.order_id WHERE orders.is_demo=1',
+        'SELECT dispute_evidence.attachment path FROM dispute_evidence JOIN disputes ON disputes.id=dispute_evidence.dispute_id JOIN orders ON orders.id=disputes.order_id WHERE orders.is_demo=1',
+    ] as $sql) {
+        foreach ($pdo->query($sql)->fetchAll() as $row) {
+            $path = (string) $row['path'];
+            if (str_starts_with($path, 'assets/uploads/') || str_starts_with($path, 'storage/private/uploads/')) {
+                $files[] = $path;
+            }
+        }
+    }
+
+    $summary = [
+        'services_retained' => (int) $pdo->query('SELECT COUNT(*) FROM services WHERE is_demo=1')->fetchColumn(),
+        'users_removed' => count($demoUsers),
+        'orders_removed' => (int) $pdo->query('SELECT COUNT(*) FROM orders WHERE is_demo=1')->fetchColumn(),
+        'messages_removed' => (int) $pdo->query('SELECT COUNT(*) FROM messages WHERE is_demo=1')->fetchColumn(),
+        'payments_removed' => (int) $pdo->query('SELECT COUNT(*) FROM payments WHERE is_demo=1')->fetchColumn(),
+    ];
+
+    $pdo->beginTransaction();
+    try {
+        // Record the affected orders before reassigning the retained services.
+        $pdo->exec('CREATE TEMPORARY TABLE IF NOT EXISTS demo_retirement_orders (id INTEGER PRIMARY KEY)');
+        $pdo->exec('DELETE FROM demo_retirement_orders');
+        $pdo->exec(
+            'INSERT INTO demo_retirement_orders (id)
+             SELECT id FROM orders WHERE is_demo=1
+             OR customer_id IN (SELECT id FROM users WHERE is_demo=1)
+             OR seller_id IN (SELECT id FROM users WHERE is_demo=1)'
+        );
+
+        $pdo->exec(
+            "DELETE FROM ledger_transactions WHERE id IN (
+                SELECT transaction_id FROM ledger_entries
+                WHERE (owner_type='user' AND owner_id IN (SELECT id FROM users WHERE is_demo=1))
+                   OR (owner_type='order' AND owner_id IN (SELECT id FROM demo_retirement_orders))
+            ) OR order_id IN (SELECT id FROM demo_retirement_orders)
+              OR user_id IN (SELECT id FROM users WHERE is_demo=1)"
+        );
+        $pdo->exec('DELETE FROM payment_requests WHERE user_id IN (SELECT id FROM users WHERE is_demo=1) OR order_id IN (SELECT id FROM demo_retirement_orders)');
+        $pdo->exec('DELETE FROM payouts WHERE is_demo=1 OR seller_id IN (SELECT id FROM users WHERE is_demo=1)');
+        $pdo->exec('DELETE FROM reviews WHERE is_demo=1 OR order_id IN (SELECT id FROM demo_retirement_orders)');
+        $pdo->exec('DELETE FROM messages WHERE is_demo=1 OR order_id IN (SELECT id FROM demo_retirement_orders) OR sender_id IN (SELECT id FROM users WHERE is_demo=1) OR receiver_id IN (SELECT id FROM users WHERE is_demo=1)');
+        $pdo->exec('DELETE FROM payments WHERE is_demo=1 OR order_id IN (SELECT id FROM demo_retirement_orders)');
+        $pdo->exec('DELETE FROM wallet_transactions WHERE is_demo=1 OR user_id IN (SELECT id FROM users WHERE is_demo=1)');
+        $pdo->exec('DELETE FROM notifications WHERE is_demo=1 OR user_id IN (SELECT id FROM users WHERE is_demo=1)');
+        $pdo->exec('DELETE FROM orders WHERE id IN (SELECT id FROM demo_retirement_orders)');
+        $pdo->exec('DELETE FROM coupons WHERE is_demo=1');
+        $pdo->exec('DELETE FROM security_logs WHERE user_id IN (SELECT id FROM users WHERE is_demo=1)');
+
+        $updateServices = $pdo->prepare(
+            "UPDATE services SET seller_id=?,is_demo=0,updated_at=CURRENT_TIMESTAMP
+             WHERE is_demo=1"
+        );
+        $updateServices->execute([$serviceOwnerId]);
+        $pdo->exec('DELETE FROM users WHERE is_demo=1');
+        $pdo->exec("DELETE FROM schema_meta WHERE meta_key IN ('demo_tracking_v1','demo_dataset_v2','demo_dataset_v3','ledger_opening_v2')");
+        $pdo->prepare("INSERT INTO system_settings (setting_key,setting_value) VALUES ('demo_mode','0') ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value,updated_at=CURRENT_TIMESTAMP")
+            ->execute();
+        $pdo->commit();
+    } catch (Throwable $error) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $error;
+    }
+
+    foreach (array_unique($files) as $file) {
+        delete_stored_upload($file);
+    }
+    return $summary + ['service_owner_email' => (string) $serviceOwner['email']];
 }

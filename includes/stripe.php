@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-function stripe_api_request(string $method, string $path, array $params = []): array
+function stripe_api_request(string $method, string $path, array $params = [], string $idempotencyKey = ''): array
 {
     if (!stripe_is_configured()) {
         throw new RuntimeException('Stripe is not configured yet.');
@@ -17,6 +17,9 @@ function stripe_api_request(string $method, string $path, array $params = []): a
         'Authorization: Bearer ' . stripe_secret_key(),
         'Stripe-Version: 2025-06-30.basil',
     ];
+    if ($idempotencyKey !== '') {
+        $headers[] = 'Idempotency-Key: ' . substr(preg_replace('/[^a-zA-Z0-9._-]/', '-', $idempotencyKey) ?? '', 0, 200);
+    }
 
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
@@ -98,19 +101,20 @@ function stripe_checkout_cancel_url(string $type, int $subjectId = 0): string
 function create_payment_request(
     string $type,
     int $userId,
-    float $amount,
+    int $amountSatang,
     string $title,
     array $payload = [],
     ?int $serviceId = null
 ): int {
     $reference = strtoupper($type === 'topup' ? 'TOP' : 'CHK') . '-' . strtoupper(bin2hex(random_bytes(5)));
     db()->prepare(
-        "INSERT INTO payment_requests (request_type,user_id,service_id,amount,currency,status,provider,provider_session_id,provider_payment_intent,reference_code,title,payload_json) VALUES (?,?,?,?,?,'pending','stripe',NULL,NULL,?,?,?)"
+        "INSERT INTO payment_requests (request_type,user_id,service_id,amount,amount_satang,currency,status,provider,provider_session_id,provider_payment_intent,reference_code,title,payload_json) VALUES (?,?,?,?,?,?,'pending','stripe',NULL,NULL,?,?,?)"
     )->execute([
         $type,
         $userId,
         $serviceId,
-        $amount,
+        satang_to_float($amountSatang),
+        $amountSatang,
         'thb',
         $reference,
         $title,
@@ -147,7 +151,7 @@ function create_stripe_checkout_session_for_payment_request(array $request): arr
 {
     $title = (string) $request['title'];
     $requestId = (int) $request['id'];
-    $amountSatang = (int) round((float) $request['amount'] * 100);
+    $amountSatang = value_satang($request, 'amount_satang', 'amount');
     $type = (string) $request['request_type'];
     $serviceId = (int) ($request['service_id'] ?? 0);
     $params = [
@@ -169,12 +173,24 @@ function create_stripe_checkout_session_for_payment_request(array $request): arr
         $params['customer_creation'] = 'always';
     }
 
-    return stripe_api_request('POST', '/v1/checkout/sessions', $params);
+    return stripe_api_request('POST', '/v1/checkout/sessions', $params, 'checkout-' . (string) $request['reference_code']);
 }
 
 function mark_payment_request_failed(array $request, string $status = 'failed'): void
 {
-    db()->prepare("UPDATE payment_requests SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='pending'")->execute([$status, (int) $request['id']]);
+    db()->prepare("UPDATE payment_requests SET status=?,processing_started_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('pending','processing')")->execute([$status, (int) $request['id']]);
+}
+
+function stripe_refund_payment(string $paymentIntentId, int $amountSatang, string $idempotencyKey): array
+{
+    if ($paymentIntentId === '' || $amountSatang < 1) {
+        throw new RuntimeException('Refund payment details are invalid.');
+    }
+    return stripe_api_request('POST', '/v1/refunds', [
+        'payment_intent' => $paymentIntentId,
+        'amount' => (string) $amountSatang,
+        'metadata[source]' => 'workconnect_order_cancellation',
+    ], $idempotencyKey);
 }
 
 function fulfill_payment_request_from_session(array $session): void
@@ -184,6 +200,22 @@ function fulfill_payment_request_from_session(array $session): void
         return;
     }
     $request = payment_request_by_session($sessionId);
+    if (!$request) {
+        $sessionMetadata = is_array($session['metadata'] ?? null) ? $session['metadata'] : [];
+        $metadataRequestId = (int) ($sessionMetadata['payment_request_id'] ?? $session['client_reference_id'] ?? 0);
+        $candidate = $metadataRequestId > 0 ? fetch_one('SELECT * FROM payment_requests WHERE id=?', [$metadataRequestId]) : null;
+        if ($candidate && empty($candidate['provider_session_id'])) {
+            db()->prepare(
+                'UPDATE payment_requests SET provider_session_id=?,provider_payment_intent=?,updated_at=CURRENT_TIMESTAMP
+                 WHERE id=? AND provider_session_id IS NULL'
+            )->execute([
+                $sessionId,
+                trim((string) ($session['payment_intent'] ?? '')) ?: null,
+                $metadataRequestId,
+            ]);
+            $request = payment_request_by_session($sessionId);
+        }
+    }
     if (!$request || (string) $request['status'] === 'completed') {
         return;
     }
@@ -192,7 +224,7 @@ function fulfill_payment_request_from_session(array $session): void
     if ($paymentStatus !== 'paid') {
         return;
     }
-    $expectedAmount = (int) round((float) $request['amount'] * 100);
+    $expectedAmount = value_satang($request, 'amount_satang', 'amount');
     $actualAmount = (int) ($session['amount_total'] ?? -1);
     $currency = strtolower((string) ($session['currency'] ?? ''));
     $referenceId = (int) ($session['client_reference_id'] ?? 0);
@@ -206,22 +238,37 @@ function fulfill_payment_request_from_session(array $session): void
 
     db()->beginTransaction();
     try {
-        $latest = fetch_one('SELECT * FROM payment_requests WHERE id=?', [(int) $request['id']]);
-        if (!$latest || (string) $latest['status'] === 'completed') {
+        $claim = db()->prepare(
+            "UPDATE payment_requests SET status='processing',processing_started_at=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP
+             WHERE id=? AND status IN ('pending','failed')"
+        );
+        $claim->execute([(int) $request['id']]);
+        if ($claim->rowCount() !== 1) {
             db()->commit();
             return;
         }
-        db()->prepare(
-            "UPDATE payment_requests SET status='completed',provider_payment_intent=?,updated_at=CURRENT_TIMESTAMP WHERE id=?"
-        )->execute([$paymentIntentValue, (int) $latest['id']]);
+        $latest = fetch_one('SELECT * FROM payment_requests WHERE id=?', [(int) $request['id']]);
+        if (!$latest) {
+            throw new RuntimeException('Payment request disappeared during fulfillment.');
+        }
+        $financialAccounts = [(int) $latest['user_id']];
+        if ((string) $latest['request_type'] === 'checkout') {
+            $checkoutSellerId = (int) scalar('SELECT seller_id FROM services WHERE id=?', [(int) ($latest['service_id'] ?? 0)]);
+            if ($checkoutSellerId > 0) {
+                $financialAccounts[] = $checkoutSellerId;
+            }
+        }
+        lock_financial_accounts($financialAccounts);
 
         if ((string) $latest['request_type'] === 'topup') {
             $reference = (string) $latest['reference_code'];
             if (!scalar('SELECT COUNT(*) FROM wallet_transactions WHERE reference=?', [$reference])) {
-                db()->prepare('INSERT INTO wallet_transactions (user_id,amount,method,status,reference,note,slip_path,is_demo) VALUES (?,?,?,?,?,?,?,?)')
+                $amountSatang = value_satang($latest, 'amount_satang', 'amount');
+                db()->prepare('INSERT INTO wallet_transactions (user_id,amount,amount_satang,method,status,reference,note,slip_path,is_demo) VALUES (?,?,?,?,?,?,?,?,?)')
                     ->execute([
                         (int) $latest['user_id'],
-                        (float) $latest['amount'],
+                        satang_to_float($amountSatang),
+                        $amountSatang,
                         'promptpay',
                         'completed',
                         $reference,
@@ -229,47 +276,89 @@ function fulfill_payment_request_from_session(array $session): void
                         '',
                         0,
                     ]);
-                db()->prepare('UPDATE users SET wallet_balance=COALESCE(wallet_balance,0)+?,updated_at=CURRENT_TIMESTAMP WHERE id=?')
-                    ->execute([(float) $latest['amount'], (int) $latest['user_id']]);
+                db()->prepare('UPDATE users SET wallet_balance_satang=wallet_balance_satang+?,updated_at=CURRENT_TIMESTAMP WHERE id=?')
+                    ->execute([$amountSatang, (int) $latest['user_id']]);
+                db()->prepare('UPDATE users SET wallet_balance=wallet_balance_satang/100.0 WHERE id=?')
+                    ->execute([(int) $latest['user_id']]);
+                ledger_post('TOPUP-' . $reference, 'provider_topup', [
+                    ['account_code' => 'customer_wallet', 'owner_type' => 'user', 'owner_id' => (int) $latest['user_id'], 'amount_satang' => $amountSatang],
+                    ['account_code' => 'payment_clearing', 'owner_type' => 'platform', 'owner_id' => 0, 'amount_satang' => -$amountSatang],
+                ], ['user_id' => (int) $latest['user_id']]);
                 notify((int) $latest['user_id'], 'payment', 'Wallet topped up', 'Your PromptPay payment was confirmed and your wallet has been updated.', '?page=topup&tx=' . $reference, false);
             }
         } elseif ((string) $latest['request_type'] === 'checkout') {
             if ((int) ($latest['order_id'] ?? 0) === 0) {
-                $service = fetch_one('SELECT * FROM services WHERE id=?', [(int) ($latest['service_id'] ?? 0)]);
+                $service = fetch_one(
+                    "SELECT services.* FROM services JOIN users seller ON seller.id=services.seller_id
+                     WHERE services.id=? AND services.status='active' AND seller.status='active'",
+                    [(int) ($latest['service_id'] ?? 0)]
+                );
                 if (!$service || (string) $service['status'] !== 'active') {
                     throw new RuntimeException('Service not available during payment fulfillment.');
                 }
-                $orderNumber = 'WC-' . date('ymd') . '-' . strtoupper(substr(bin2hex(random_bytes(3)), 0, 5));
-                $dueAt = date('Y-m-d H:i:s', strtotime('+' . (int) $service['delivery_days'] . ' days'));
-                db()->prepare("INSERT INTO orders (order_number,customer_id,seller_id,service_id,status,requirements,subtotal,discount,total,due_at,is_demo,coupon_code) VALUES (?,?,?,?,'pending',?,?,?,?,?,?,?)")
+                $orderNumber = 'WC-' . gmdate('ymd') . '-' . strtoupper(bin2hex(random_bytes(4)));
+                $dueAt = gmdate('Y-m-d H:i:s', time() + ((int) $service['delivery_days'] * 86400));
+                $subtotalSatang = isset($payload['subtotal_satang'])
+                    ? (int) $payload['subtotal_satang']
+                    : value_satang($service, 'price_satang', 'price');
+                $discountSatang = (int) ($payload['discount_satang'] ?? 0);
+                $totalSatang = value_satang($latest, 'amount_satang', 'amount');
+                $feeBps = platform_fee_bps();
+                $platformFeeSatang = calculate_platform_fee_satang($totalSatang, $feeBps);
+                $sellerNetSatang = $totalSatang - $platformFeeSatang;
+                db()->prepare(
+                    "INSERT INTO orders
+                     (order_number,customer_id,seller_id,service_id,status,requirements,subtotal,discount,total,
+                      subtotal_satang,discount_satang,total_satang,fee_rate_bps,platform_fee_satang,seller_net_satang,
+                      due_at,is_demo,coupon_code)
+                     VALUES (?,?,?,?,'pending',?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                )
                     ->execute([
                         $orderNumber,
                         (int) $latest['user_id'],
                         (int) $service['seller_id'],
                         (int) $service['id'],
                         (string) ($payload['requirements'] ?? ''),
-                        (float) ($payload['subtotal'] ?? $latest['amount']),
-                        (float) ($payload['discount'] ?? 0),
-                        (float) $latest['amount'],
+                        satang_to_float($subtotalSatang),
+                        satang_to_float($discountSatang),
+                        satang_to_float($totalSatang),
+                        $subtotalSatang,
+                        $discountSatang,
+                        $totalSatang,
+                        $feeBps,
+                        $platformFeeSatang,
+                        $sellerNetSatang,
                         $dueAt,
                         (int) ($service['is_demo'] ?? 0),
                         (string) ($payload['coupon_code'] ?? ''),
                     ]);
                 $orderId = database_last_insert_id();
-                db()->prepare("INSERT INTO payments (order_id,amount,method,status,transaction_ref,is_demo,paid_at) VALUES (?,?,?,'paid',?,?,CURRENT_TIMESTAMP)")
+                db()->prepare("INSERT INTO payments (order_id,amount,amount_satang,method,status,transaction_ref,is_demo,paid_at) VALUES (?,?,?,?,'paid',?,?,CURRENT_TIMESTAMP)")
                     ->execute([
                         $orderId,
-                        (float) $latest['amount'],
+                        satang_to_float($totalSatang),
+                        $totalSatang,
                         'promptpay',
                         $paymentIntentId !== '' ? $paymentIntentId : $sessionId,
                         (int) ($service['is_demo'] ?? 0),
                     ]);
                 db()->prepare('UPDATE payment_requests SET order_id=? WHERE id=?')->execute([$orderId, (int) $latest['id']]);
+                ledger_post('ORDER-' . $orderNumber, 'provider_order_charge', [
+                    ['account_code' => 'payment_clearing', 'owner_type' => 'platform', 'owner_id' => 0, 'amount_satang' => -$totalSatang],
+                    ['account_code' => 'platform_escrow', 'owner_type' => 'order', 'owner_id' => $orderId, 'amount_satang' => $totalSatang],
+                ], ['order_id' => $orderId, 'user_id' => (int) $latest['user_id']]);
+                record_order_event($orderId, (int) $latest['user_id'], 'order_placed', null, 'pending', '', [
+                    'payment_method' => 'promptpay',
+                    'total_satang' => $totalSatang,
+                ]);
                 notify((int) $service['seller_id'], 'order', 'New order received', $orderNumber . ' was paid via PromptPay and is ready for your review.', '?page=seller-orders', false);
                 notify((int) $latest['user_id'], 'payment', 'Payment confirmed', 'Your PromptPay payment was confirmed and order ' . $orderNumber . ' has been created.', '?page=orders', false);
             }
         }
 
+        db()->prepare(
+            "UPDATE payment_requests SET status='completed',provider_payment_intent=?,processing_started_at=NULL,updated_at=CURRENT_TIMESTAMP WHERE id=? AND status='processing'"
+        )->execute([$paymentIntentValue, (int) $latest['id']]);
         db()->commit();
     } catch (Throwable $error) {
         db()->rollBack();

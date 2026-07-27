@@ -13,8 +13,10 @@ $publicTheme = $prefs['theme'];
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="assets/css/style.css?v=<?= filemtime(__DIR__ . '/../assets/css/style.css') ?>">
+    <?php if ($page !== 'home'): ?><link rel="stylesheet" href="assets/css/apple-ui.css?v=<?= filemtime(__DIR__ . '/../assets/css/apple-ui.css') ?>"><?php endif; ?>
 </head>
-<body class="public-page theme-<?= e($publicTheme) ?> text-<?= e($prefs['text_scale']) ?> ui-<?= e($prefs['ui_scale']) ?>" data-page="<?= htmlspecialchars($page) ?>" data-theme="<?= e($publicTheme) ?>" data-language="<?= e($prefs['language']) ?>" data-text-scale="<?= e($prefs['text_scale']) ?>" data-ui-scale="<?= e($prefs['ui_scale']) ?>" data-preference-source="guest">
+<body class="public-page<?= $page !== 'home' ? ' apple-shell' : '' ?> theme-<?= e($publicTheme) ?> text-<?= e($prefs['text_scale']) ?> ui-<?= e($prefs['ui_scale']) ?>" data-page="<?= htmlspecialchars($page) ?>" data-theme="<?= e($publicTheme) ?>" data-language="<?= e($prefs['language']) ?>" data-text-scale="<?= e($prefs['text_scale']) ?>" data-ui-scale="<?= e($prefs['ui_scale']) ?>" data-preference-source="guest">
+<a class="skip-link" href="#main-content"><?= e($prefs['language'] === 'th' ? 'ข้ามไปเนื้อหาหลัก' : 'Skip to main content') ?></a>
 <?php $servicesPage = !empty($user) ? 'marketplace' : 'services'; $aboutPage = !empty($user) ? 'about-workspace' : 'about'; $searchPage = !empty($user) ? 'marketplace' : 'search'; ?>
 <header class="site-header">
     <div class="container nav-wrap">
@@ -22,8 +24,8 @@ $publicTheme = $prefs['theme'];
             <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
             <span>WorkConnect</span>
         </a>
-        <button class="menu-toggle" type="button" aria-label="Open menu" aria-expanded="false"><span></span><span></span></button>
-        <nav class="main-nav" aria-label="Main navigation">
+        <button class="menu-toggle" type="button" aria-label="Open menu" aria-controls="main-navigation" aria-expanded="false"><span></span><span></span></button>
+        <nav class="main-nav" id="main-navigation" aria-label="Main navigation">
             <a class="<?= $page === 'home' ? 'active' : '' ?>" href="?page=home"><?= e(t('nav_home', $prefs['language'])) ?></a>
             <a class="<?= in_array($page, ['services', 'marketplace', 'service-detail', 'marketplace-detail'], true) ? 'active' : '' ?>" href="?page=<?= e($servicesPage) ?>"><?= e(t('nav_services', $prefs['language'])) ?></a>
             <a class="<?= in_array($page, ['about', 'about-workspace'], true) ? 'active' : '' ?>" href="?page=<?= e($aboutPage) ?>"><?= e(t('nav_about', $prefs['language'])) ?></a>
@@ -62,5 +64,5 @@ $publicTheme = $prefs['theme'];
     <i class="site-announcement-progress" aria-hidden="true"></i>
 </div>
 <?php endif; ?>
-<main>
-<?php foreach (pull_flashes() as $flash): ?><div class="flash public-flash <?= e($flash['type']) ?>" role="status"><span><?= $flash['type'] === 'success' ? '✓' : '!' ?></span><p><?= e($flash['message']) ?></p><button type="button" aria-label="Dismiss">×</button></div><?php endforeach; ?>
+<main id="main-content" tabindex="-1">
+<?php foreach (pull_flashes() as $flash): ?><div class="flash public-flash <?= e($flash['type']) ?>" role="status"><span><?= $page === 'home' ? ($flash['type'] === 'success' ? '✓' : '!') : icon_svg($flash['type'] === 'success' ? 'check-circle' : 'shield') ?></span><p><?= e($flash['message']) ?></p><button type="button" aria-label="Dismiss"><?= $page === 'home' ? '×' : icon_svg('close') ?></button></div><?php endforeach; ?>

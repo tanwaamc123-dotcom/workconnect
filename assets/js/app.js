@@ -2,10 +2,14 @@ document.documentElement.classList.add('js');
 
 const menuToggle = document.querySelector('.menu-toggle');
 const mainNav = document.querySelector('.main-nav');
+const setMainNavigationState = (open) => {
+    menuToggle?.setAttribute('aria-expanded', String(open));
+    menuToggle?.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+};
 
 menuToggle?.addEventListener('click', () => {
     const open = mainNav?.classList.toggle('open') ?? false;
-    menuToggle.setAttribute('aria-expanded', String(open));
+    setMainNavigationState(open);
 });
 
 const passwordToggle = document.querySelector('#toggle-password');
@@ -26,6 +30,9 @@ const refreshAdminCodeField = () => {
     if (adminRoleInputs.length === 0) return;
     const adminSelected = document.querySelector('input[name="role"][value="admin"]')?.checked ?? false;
     const sellerSelected = document.querySelector('input[name="role"][value="seller"]')?.checked ?? false;
+    if (document.body.classList.contains('auth-page')) {
+        document.body.dataset.authRole = sellerSelected ? 'seller' : 'customer';
+    }
     if (adminCodeField) adminCodeField.hidden = !adminSelected;
     if (sellerVerificationFields) sellerVerificationFields.hidden = !sellerSelected;
     const adminCodeInput = adminCodeField?.querySelector('input[name="admin_code"]');
@@ -42,16 +49,50 @@ refreshAdminCodeField();
 
 const workspaceMenu = document.querySelector('.workspace-menu');
 const workspaceOverlay = document.querySelector('.workspace-overlay');
-const closeWorkspaceNavigation = () => document.body.classList.remove('nav-open');
+const setWorkspaceNavigationState = (open) => {
+    workspaceMenu?.setAttribute('aria-expanded', String(open));
+    workspaceMenu?.setAttribute('aria-label', open ? 'Close workspace navigation' : 'Open workspace navigation');
+};
+const closeWorkspaceNavigation = () => {
+    document.body.classList.remove('nav-open');
+    setWorkspaceNavigationState(false);
+};
 
-workspaceMenu?.addEventListener('click', () => document.body.classList.toggle('nav-open'));
+workspaceMenu?.addEventListener('click', () => {
+    const open = document.body.classList.toggle('nav-open');
+    setWorkspaceNavigationState(open);
+});
 workspaceOverlay?.addEventListener('click', closeWorkspaceNavigation);
 document.querySelectorAll('.workspace-sidebar a').forEach((link) => link.addEventListener('click', closeWorkspaceNavigation));
+document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    closeWorkspaceNavigation();
+    mainNav?.classList.remove('open');
+    setMainNavigationState(false);
+});
 
 const toastState = {
     stack: null,
     counter: 0,
 };
+
+function appleInterfaceIcon(name, className = 'wc-icon') {
+    const paths = {
+        success: '<circle cx="12" cy="12" r="9"/><path d="m8 12 2.7 2.7 5.6-5.8"/>',
+        error: '<path d="m12 3.3 7.2 3.3v5.2c0 4.6-2.9 7.3-7.2 8.9-4.3-1.6-7.2-4.3-7.2-8.9V6.6Z"/><path d="M12 8.2v4.5M12 16h.01"/>',
+        warning: '<path d="M12 3.8 21 20H3Z"/><path d="M12 9v4.5M12 16.6h.01"/>',
+        account: '<circle cx="12" cy="8.1" r="4.1"/><path d="M4.8 20a7.2 7.2 0 0 1 14.4 0"/>',
+        order: '<path d="M5.1 8.2h13.8l-1 11.1H6.1Z"/><path d="M8.6 9V7.1a3.4 3.4 0 0 1 6.8 0V9"/>',
+        message: '<path d="M4.2 5.6h15.6v11H10l-5.8 3.2Z"/><path d="M8 9.2h8M8 13h5.2"/>',
+        payment: '<path d="M4.2 6.8h14.1a1.7 1.7 0 0 1 1.7 1.7v9.2H5.9A1.9 1.9 0 0 1 4 15.8V6.2a2 2 0 0 1 2-2h11.2"/><path d="M15.1 10.5H20v4.3h-4.9a2.2 2.2 0 1 1 0-4.3Z"/>',
+        review: '<path d="m12 3.8 2.5 5 5.5.8-4 3.9.9 5.5-4.9-2.6L7.1 19l.9-5.5-4-3.9 5.5-.8Z"/>',
+        announcement: '<path d="m4.2 10 11.1-4.8v13.6L4.2 14Z"/><path d="M4.2 10v4M8 15.7l1 4"/><path d="M18 8.2a5.2 5.2 0 0 1 0 7.6"/>',
+        info: '<circle cx="12" cy="12" r="9"/><path d="M12 10.7v5.7M12 7.5h.01"/>',
+        close: '<path d="m6.2 6.2 11.6 11.6M17.8 6.2 6.2 17.8"/>',
+    };
+    const body = paths[name] || paths.info;
+    return `<svg class="${className}" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+}
 
 function ensureToastStack() {
     if (toastState.stack) return toastState.stack;
@@ -98,7 +139,11 @@ function showToast({ type = 'info', title, message, actionLabel = '', actionHref
     const icon = document.createElement('span');
     icon.className = 'toast-icon';
     icon.setAttribute('aria-hidden', 'true');
-    icon.textContent = meta.icon;
+    if (document.body.classList.contains('apple-shell')) {
+        icon.innerHTML = appleInterfaceIcon(type);
+    } else {
+        icon.textContent = meta.icon;
+    }
 
     const copy = document.createElement('div');
     copy.className = 'toast-copy';
@@ -119,7 +164,11 @@ function showToast({ type = 'info', title, message, actionLabel = '', actionHref
     closeButton.type = 'button';
     closeButton.className = 'toast-close';
     closeButton.setAttribute('aria-label', 'Dismiss notification');
-    closeButton.textContent = '×';
+    if (document.body.classList.contains('apple-shell')) {
+        closeButton.innerHTML = appleInterfaceIcon('close');
+    } else {
+        closeButton.textContent = '×';
+    }
 
     toast.append(icon, copy, closeButton);
     const close = () => {
@@ -178,6 +227,11 @@ function fillDemoCredentials(emailAddress) {
     if (!email || !demoPassword || !emailAddress) return;
     email.value = emailAddress;
     demoPassword.value = 'Demo1234!';
+    [email, demoPassword].forEach((input) => input.dispatchEvent(new Event('input', { bubbles: true })));
+    const card = document.querySelector('.auth-card');
+    card?.classList.remove('demo-prefilled');
+    window.requestAnimationFrame(() => card?.classList.add('demo-prefilled'));
+    window.setTimeout(() => card?.classList.remove('demo-prefilled'), 900);
     email.focus();
 }
 
@@ -221,13 +275,46 @@ tableFilterButtons.forEach((button) => button.addEventListener('click', () => {
 }));
 
 document.querySelectorAll('.responsive-table table').forEach((table) => {
+    if (!table.querySelector('caption')) {
+        const heading = table.closest('section')?.querySelector('h1, h2, h3')?.textContent?.trim();
+        const caption = document.createElement('caption');
+        caption.className = 'sr-only';
+        caption.textContent = heading || 'WorkConnect records';
+        table.prepend(caption);
+    }
     const body = table.querySelector('tbody');
     if (!body || body.children.length > 0) return;
     const columns = Math.max(1, table.querySelectorAll('thead th').length);
     const row = document.createElement('tr');
     row.className = 'generated-empty-row';
-    row.innerHTML = `<td colspan="${columns}"><div><span>◇</span><strong>No records yet</strong><small>New activity will appear here automatically.</small></div></td>`;
+    const emptyIcon = document.body.classList.contains('apple-shell') ? appleInterfaceIcon('info') : '◇';
+    row.innerHTML = `<td colspan="${columns}"><div><span>${emptyIcon}</span><strong>No records yet</strong><small>New activity will appear here automatically.</small></div></td>`;
     body.appendChild(row);
+});
+
+document.querySelectorAll('[data-auto-submit]').forEach((input) => {
+    input.addEventListener('change', () => input.form?.requestSubmit());
+});
+
+document.querySelectorAll('form[data-confirm]').forEach((form) => {
+    form.addEventListener('submit', (event) => {
+        if (!window.confirm(form.dataset.confirm || 'Continue?')) event.preventDefault();
+    });
+});
+
+document.querySelectorAll('form').forEach((form) => {
+    form.addEventListener('submit', (event) => {
+        if (event.defaultPrevented || form.dataset.submitting === '1') {
+            if (form.dataset.submitting === '1') event.preventDefault();
+            return;
+        }
+        if (!form.checkValidity()) return;
+        form.dataset.submitting = '1';
+        form.querySelectorAll('button[type="submit"], input[type="submit"]').forEach((control) => {
+            control.disabled = true;
+            control.setAttribute('aria-disabled', 'true');
+        });
+    });
 });
 
 const preferenceForm = document.querySelector('[data-preference-form]');
@@ -237,7 +324,6 @@ const preferenceState = {
     textScale: document.body.dataset.textScale || 'medium',
     uiScale: document.body.dataset.uiScale || 'comfortable',
 };
-const realtimePreferenceKey = 'workconnect-realtime-enabled';
 
 function storageGet(key) {
     try {
@@ -260,20 +346,6 @@ function writePreferenceStorage() {
     storageSet('workconnect-language', preferenceState.language);
     storageSet('workconnect-text-scale', preferenceState.textScale);
     storageSet('workconnect-ui-scale', preferenceState.uiScale);
-}
-
-function isRealtimeEnabled() {
-    const stored = storageGet(realtimePreferenceKey);
-    return stored === null ? true : stored === '1';
-}
-
-function setRealtimePreference(enabled) {
-    storageSet(realtimePreferenceKey, enabled ? '1' : '0');
-    const input = document.querySelector('[data-realtime-setting]');
-    if (input) input.checked = enabled;
-    updateRealtimeToggleButton(enabled);
-    if (enabled) startRealtime();
-    else stopRealtime();
 }
 
 function themeToAppliedValue(theme) {
@@ -341,12 +413,6 @@ if (preferenceForm) {
     });
 }
 
-const realtimeSettingInput = document.querySelector('[data-realtime-setting]');
-if (realtimeSettingInput) {
-    realtimeSettingInput.checked = isRealtimeEnabled();
-    realtimeSettingInput.addEventListener('change', () => setRealtimePreference(realtimeSettingInput.checked));
-}
-
 document.querySelectorAll('[data-topup-amount]').forEach((button) => {
     button.addEventListener('click', () => {
         const input = document.querySelector('#topup-amount');
@@ -384,35 +450,23 @@ const realtimeState = {
     notificationCount: Number(document.body.dataset.unreadNotifications || 0),
     messageCount: Number(document.body.dataset.unreadMessages || 0),
     loading: false,
-    source: null,
     fallbackTimer: null,
-    fallbackStarted: false,
 };
 
-function updateRealtimeToggleButton(enabled = isRealtimeEnabled()) {
-    const button = document.querySelector('[data-realtime-toggle]');
-    if (!button) return;
-    button.classList.toggle('is-off', !enabled);
-    button.setAttribute('aria-label', enabled ? 'Turn realtime off' : 'Turn realtime on');
-    button.title = enabled ? 'Realtime on' : 'Realtime off';
-    button.textContent = enabled ? '↻' : '⏸';
-}
-
 function stopRealtime() {
-    if (realtimeState.source) {
-        try { realtimeState.source.close(); } catch (error) {}
-        realtimeState.source = null;
-    }
     if (realtimeState.fallbackTimer) {
         window.clearInterval(realtimeState.fallbackTimer);
         realtimeState.fallbackTimer = null;
     }
-    realtimeState.fallbackStarted = false;
 }
 
 function formatBaht(value) {
     const amount = Number(value || 0);
-    return `฿${Math.round(amount).toLocaleString('en-US')}`;
+    const fractionDigits = Number.isInteger(amount) ? 0 : 2;
+    return `฿${amount.toLocaleString('en-US', {
+        minimumFractionDigits: fractionDigits,
+        maximumFractionDigits: 2,
+    })}`;
 }
 
 function applyRealtimeData(data) {
@@ -447,15 +501,10 @@ function applyRealtimeData(data) {
             badge.remove();
         }
     });
-    const walletValue = document.querySelector('.top-wallet strong, .topup-summary strong');
-    if (walletValue && typeof data.wallet_balance !== 'undefined') {
-        walletValue.textContent = formatBaht(data.wallet_balance);
-    }
-    if (page === 'topup') {
-        const balanceValue = document.querySelector('.topup-summary strong');
-        if (balanceValue && typeof data.wallet_balance !== 'undefined') {
-            balanceValue.textContent = formatBaht(data.wallet_balance);
-        }
+    if (typeof data.wallet_balance !== 'undefined') {
+        document.querySelectorAll('[data-wallet-balance]').forEach((walletValue) => {
+            walletValue.textContent = formatBaht(data.wallet_balance);
+        });
     }
     if (realtimeState.notificationCount !== null && nextNotificationCount > realtimeState.notificationCount) {
         showToast({
@@ -502,13 +551,17 @@ function applyRealtimeData(data) {
 }
 
 async function pollRealtime() {
-    if (realtimeState.loading || !document.body.dataset.page || document.visibilityState === 'hidden') return;
+    if (realtimeState.loading || !document.body.dataset.page) return;
     const order = new URLSearchParams(window.location.search).get('order');
     const url = new URL(window.location.href);
     url.search = `?page=sync${order ? `&order=${encodeURIComponent(order)}` : ''}`;
     realtimeState.loading = true;
     try {
-        const response = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
+        const response = await fetch(url.toString(), {
+            credentials: 'same-origin',
+            cache: 'no-store',
+            headers: { Accept: 'application/json' },
+        });
         if (!response.ok) return;
         applyRealtimeData(await response.json());
     } catch (error) {
@@ -519,36 +572,16 @@ async function pollRealtime() {
 }
 
 function startRealtime() {
-    const realtimePages = new Set(['dashboard', 'orders', 'messages', 'notifications', 'topup', 'seller-dashboard', 'seller-orders', 'seller-messages', 'admin-control', 'admin-orders', 'admin-messages', 'admin-finance']);
-    updateRealtimeToggleButton();
-    if (!isRealtimeEnabled()) return;
-    if (document.body.dataset.preferenceSource === 'public' || !document.body.dataset.page || ['login', 'register'].includes(document.body.dataset.page) || !realtimePages.has(document.body.dataset.page)) return;
+    if (document.body.dataset.preferenceSource === 'public' || !document.body.dataset.page || ['login', 'register'].includes(document.body.dataset.page)) return;
     stopRealtime();
-    const order = new URLSearchParams(window.location.search).get('order');
-    const url = new URL(window.location.href);
-    url.search = `?page=stream${order ? `&order=${encodeURIComponent(order)}` : ''}`;
-    if (window.EventSource) {
-        const source = new EventSource(url.toString(), { withCredentials: true });
-        realtimeState.source = source;
-        source.onmessage = (event) => {
-            try {
-                applyRealtimeData(JSON.parse(event.data));
-            } catch (error) {
-                // Ignore malformed stream frames.
-            }
-        };
-        source.onerror = () => {
-            if (realtimeState.fallbackStarted) return;
-            realtimeState.fallbackStarted = true;
-            try { source.close(); } catch (error) {}
-            pollRealtime();
-            realtimeState.fallbackTimer = window.setInterval(pollRealtime, 15000);
-        };
-        return;
-    }
     pollRealtime();
-    realtimeState.fallbackTimer = window.setInterval(pollRealtime, 15000);
+    realtimeState.fallbackTimer = window.setInterval(pollRealtime, 20000);
 }
 
-updateRealtimeToggleButton();
 startRealtime();
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') pollRealtime();
+});
+window.addEventListener('focus', () => {
+    pollRealtime();
+});
